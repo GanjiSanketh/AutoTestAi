@@ -11,6 +11,7 @@ export const Permissions = {
   TestCasesManage: 'testcases.manage',
   ExecutionsRead: 'executions.read',
   ExecutionsExecute: 'executions.execute',
+  ExecutionsCancel: 'executions.cancel',
   BugsRead: 'bugs.read',
   BugsManage: 'bugs.manage',
   TicketsRead: 'tickets.read',

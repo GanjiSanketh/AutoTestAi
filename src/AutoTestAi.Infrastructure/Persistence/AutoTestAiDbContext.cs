@@ -29,6 +29,7 @@ public sealed class AutoTestAiDbContext : DbContext
     public DbSet<SuiteTestCase> SuiteTestCases => Set<SuiteTestCase>();
     public DbSet<Execution> Executions => Set<Execution>();
     public DbSet<ExecutionTest> ExecutionTests => Set<ExecutionTest>();
+    public DbSet<ExecutionStepResult> ExecutionStepResults => Set<ExecutionStepResult>();
     public DbSet<ExecutionLog> ExecutionLogs => Set<ExecutionLog>();
     public DbSet<ExecutionArtifact> ExecutionArtifacts => Set<ExecutionArtifact>();
     public DbSet<FailureAnalysis> FailureAnalyses => Set<FailureAnalysis>();
@@ -80,12 +81,25 @@ public sealed class AutoTestAiDbContext : DbContext
         // --- execution ---
         modelBuilder.Entity<Execution>().ToTable("executions");
         modelBuilder.Entity<Execution>().HasIndex(e => new { e.ProjectId, e.Status });
+        modelBuilder.Entity<Execution>()
+            .HasIndex(e => new { e.ProjectId, e.IdempotencyKey })
+            .IsUnique()
+            .HasFilter("\"IdempotencyKey\" IS NOT NULL");
         modelBuilder.Entity<Execution>().Property(e => e.Status).HasConversion<string>();
         modelBuilder.Entity<Execution>().Property(e => e.TriggerType).HasConversion<string>();
+        modelBuilder.Entity<Execution>().Property(e => e.IdempotencyKey).HasMaxLength(100);
         modelBuilder.Entity<ExecutionTest>().ToTable("execution_tests");
         modelBuilder.Entity<ExecutionTest>().HasIndex(e => e.ExecutionId);
         modelBuilder.Entity<ExecutionTest>().HasIndex(e => e.Status);
         modelBuilder.Entity<ExecutionTest>().Property(e => e.Status).HasConversion<string>();
+        modelBuilder.Entity<ExecutionTest>().Property(e => e.FailureClassification).HasConversion<string>();
+        modelBuilder.Entity<ExecutionTest>().Property(e => e.Framework).HasMaxLength(100);
+        modelBuilder.Entity<ExecutionTest>().Property(e => e.Browser).HasMaxLength(50);
+        modelBuilder.Entity<ExecutionStepResult>().ToTable("execution_step_results");
+        modelBuilder.Entity<ExecutionStepResult>()
+            .HasIndex(s => new { s.ExecutionTestId, s.StepOrder });
+        modelBuilder.Entity<ExecutionStepResult>().Property(s => s.Status).HasConversion<string>();
+        modelBuilder.Entity<ExecutionStepResult>().Property(s => s.Action).HasMaxLength(200);
         modelBuilder.Entity<ExecutionLog>().ToTable("execution_logs");
         modelBuilder.Entity<ExecutionLog>().Property(e => e.Id).UseIdentityByDefaultColumn();
         modelBuilder.Entity<ExecutionLog>()
@@ -93,6 +107,7 @@ public sealed class AutoTestAiDbContext : DbContext
         modelBuilder.Entity<ExecutionLog>().Property(e => e.Metadata).HasColumnType("jsonb");
         modelBuilder.Entity<ExecutionArtifact>().ToTable("execution_artifacts");
         modelBuilder.Entity<ExecutionArtifact>().HasIndex(a => a.ExecutionTestId);
+        modelBuilder.Entity<ExecutionArtifact>().Property(a => a.FileName).HasMaxLength(255);
         modelBuilder.Entity<FailureAnalysis>().ToTable("failure_analyses");
         modelBuilder.Entity<FailureAnalysis>().HasIndex(f => f.ExecutionTestId);
         modelBuilder.Entity<FailureAnalysis>().Property(f => f.Classification).HasConversion<string>();

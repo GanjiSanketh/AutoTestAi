@@ -141,6 +141,11 @@ services:
       Minio__SecretKey: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
       Minio__UseSsl: "false"
       Cors__AllowedOrigins__0: ${WEB_ORIGIN:-http://localhost:5173}
+      Execution__DefaultExecutionTimeoutSeconds: 300
+      Execution__DefaultStepTimeoutSeconds: 30
+      Worker__BaseUrl: http://playwright-worker:8090
+      Worker__ApiToken: ${WORKER_API_TOKEN:-}
+      Worker__RequestTimeoutSeconds: 30
     ports:
       - "${API_PORT:-5193}:8080"
     healthcheck:
@@ -176,6 +181,7 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_TASK_QUEUE: autotestai-execution
       WORKER_HEALTH_PORT: 8090
+      WORKER_API_TOKEN: ${WORKER_API_TOKEN:-}
 
 volumes:
   pgdata:

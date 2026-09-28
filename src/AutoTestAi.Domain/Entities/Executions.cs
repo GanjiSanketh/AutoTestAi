@@ -13,6 +13,13 @@ public sealed class Execution : EntityBase
     public TriggerType TriggerType { get; set; } = TriggerType.Manual;
     public Guid? EnvironmentId { get; set; }
     public string? WorkflowId { get; set; }
+
+    /// <summary>
+    /// Client-supplied idempotency key (Slice 5 §41). Repeating a start request
+    /// with the same key returns the original execution instead of duplicating it.
+    /// </summary>
+    public string? IdempotencyKey { get; set; }
+
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public Guid? CreatedBy { get; set; }
@@ -22,12 +29,44 @@ public sealed class ExecutionTest : EntityBase
 {
     public Guid ExecutionId { get; set; }
     public Guid TestCaseId { get; set; }
+
+    /// <summary>
+    /// Exact immutable version bound at creation (Slice 5 invariant). Never
+    /// re-resolved to "latest" after the execution starts.
+    /// </summary>
     public Guid? TestCaseVersionId { get; set; }
+
     public ExecutionTestStatus Status { get; set; } = ExecutionTestStatus.Queued;
     public string? WorkerId { get; set; }
     public int Attempt { get; set; }
+
+    /// <summary>Framework/browser snapshot taken from the bound version at creation.</summary>
+    public string? Framework { get; set; }
+    public string? Browser { get; set; }
+
+    /// <summary>Failure classification for the result (Slice 5 §19). Unknown until terminal.</summary>
+    public FailureClassification FailureClassification { get; set; } = FailureClassification.Unknown;
+
     public long? DurationMs { get; set; }
     public string? ErrorType { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
+/// <summary>
+/// Persisted per-step outcome (Slice 5 §16). Step values are stored redacted:
+/// password-like targets never persist plaintext.
+/// </summary>
+public sealed class ExecutionStepResult
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ExecutionTestId { get; set; }
+    public int StepOrder { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public string? Target { get; set; }
+    public ExecutionTestStatus Status { get; set; } = ExecutionTestStatus.Queued;
+    public DateTimeOffset? StartedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public long? DurationMs { get; set; }
     public string? ErrorMessage { get; set; }
 }
 
@@ -46,6 +85,13 @@ public sealed class ExecutionArtifact : EntityBase
     public Guid ExecutionTestId { get; set; }
     public string ArtifactType { get; set; } = string.Empty;
     public string StorageKey { get; set; } = string.Empty;
+
+    /// <summary>Human-friendly display name; object names never carry secrets.</summary>
+    public string? FileName { get; set; }
+
+    /// <summary>Owning step order when the artifact belongs to a step.</summary>
+    public int? StepOrder { get; set; }
+
     public string? ContentType { get; set; }
     public long? SizeBytes { get; set; }
 }

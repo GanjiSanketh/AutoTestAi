@@ -19,7 +19,7 @@
 | Project management | Projects + project_members (Slice 2: CRUD, soft-delete archive, members + roles, environment metadata, default environment, audit events; list scoped server-side; IDOR-tested) |
 | Test repository | test_cases + test_case_versions (Slice 3: CRUD, project-scoped keys, immutable sequential versioning with concurrency retry, structured-steps JSONB, review lifecycle, archive, filters/search/pagination, list omits source; IDOR-tested) |
 | AI test generation | AI gateway (`IAiTestGenerator` → `IAiProviderResolver` → `IAiProvider`) + Ollama/OpenAI HTTP adapters (Slice 4: project-scoped `POST …/test-generation`, prompt `test-generation-v1`, structured-output validation, secret redaction, `sourceType=ai` + `Pending` versions via `TestCaseService`, safe provider-status endpoint, audit events; Gemini planned/unsupported; generated code never executed) |
-| Test execution | Temporal + isolated Playwright worker |
+| Test execution | Execution control plane + Temporal `TestExecutionWorkflow` + Playwright step-interpreter worker (Slice 5: exact-version binding, approval gate, Queued→Running→Passed/Failed/Cancelled/TimedOut/Error, single infra retry, idempotent cancel/timeout finalization, step results/logs/screenshot artifacts via MinIO + presigned downloads, SignalR live events, execution history/detail UI; source code never executed) |
 | Live execution | SignalR |
 | Failure analysis | failure_analyses + AI analysis |
 | Defect management | defects |

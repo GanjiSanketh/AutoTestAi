@@ -1,3 +1,4 @@
+using AutoTestAi.Application.Storage;
 using Microsoft.Extensions.Options;
 using Minio;
 using Minio.DataModel.Args;
@@ -16,18 +17,6 @@ public sealed class MinioOptions
         !string.IsNullOrWhiteSpace(Endpoint) &&
         !string.IsNullOrWhiteSpace(AccessKey) &&
         !string.IsNullOrWhiteSpace(SecretKey);
-}
-
-/// <summary>
-/// Artifact storage abstraction (screenshots, videos, traces, reports).
-/// PostgreSQL stores only metadata/references; bytes live in MinIO/S3.
-/// </summary>
-public interface IArtifactStorage
-{
-    bool IsConfigured { get; }
-    Task UploadAsync(string storageKey, Stream content, string contentType, CancellationToken cancellationToken);
-    Task<string> GetPresignedDownloadUrlAsync(string storageKey, int expirySeconds, CancellationToken cancellationToken);
-    Task<bool> CheckConnectivityAsync(CancellationToken cancellationToken);
 }
 
 public sealed class MinioArtifactStorage : IArtifactStorage

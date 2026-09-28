@@ -131,6 +131,10 @@ namespace AutoTestAi.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("EnvironmentId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uuid");
 
@@ -156,6 +160,10 @@ namespace AutoTestAi.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ProjectId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("\"IdempotencyKey\" IS NOT NULL");
+
                     b.HasIndex("ProjectId", "Status");
 
                     b.ToTable("executions", (string)null);
@@ -180,8 +188,15 @@ namespace AutoTestAi.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("ExecutionTestId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("FileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
                     b.Property<long?>("SizeBytes")
                         .HasColumnType("bigint");
+
+                    b.Property<int?>("StepOrder")
+                        .HasColumnType("integer");
 
                     b.Property<string>("StorageKey")
                         .IsRequired()
@@ -229,6 +244,49 @@ namespace AutoTestAi.Infrastructure.Persistence.Migrations
                     b.ToTable("execution_logs", (string)null);
                 });
 
+            modelBuilder.Entity("AutoTestAi.Domain.Entities.ExecutionStepResult", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("DurationMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ExecutionTestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("StepOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Target")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExecutionTestId", "StepOrder");
+
+                    b.ToTable("execution_step_results", (string)null);
+                });
+
             modelBuilder.Entity("AutoTestAi.Domain.Entities.ExecutionTest", b =>
                 {
                     b.Property<Guid>("Id")
@@ -237,6 +295,10 @@ namespace AutoTestAi.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("Attempt")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Browser")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -252,6 +314,14 @@ namespace AutoTestAi.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid>("ExecutionId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("FailureClassification")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Framework")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<string>("Status")
                         .IsRequired()

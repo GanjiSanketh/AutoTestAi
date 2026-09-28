@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Play, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -14,6 +14,7 @@ import {
   testcasesEndpoints,
   type TestCaseVersion,
 } from '../../lib/api/endpoints/testcases';
+import { executionEndpoints } from '../../lib/api/endpoints/executions';
 import { useProfile } from '../../lib/auth/useProfile';
 import { Permissions, hasPermission } from '../../lib/auth/permissions';
 import { SourceEditor, editorLanguageFor } from './SourceEditor';
@@ -65,6 +66,7 @@ export function TestCaseDetailsPage() {
   const queryClient = useQueryClient();
   const profile = useProfile();
   const canManage = hasPermission(profile.data?.permissions, Permissions.TestCasesManage);
+  const canExecute = hasPermission(profile.data?.permissions, Permissions.ExecutionsExecute);
 
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -108,6 +110,23 @@ export function TestCaseDetailsPage() {
       invalidate();
       navigate(`/projects/${projectId}/test-cases`);
     },
+  });
+
+  const [runError, setRunError] = useState<ApiError | null>(null);
+  const run = useMutation({
+    mutationFn: (versionId: string) =>
+      executionEndpoints.start(projectId, {
+        testCaseVersionId: versionId,
+        idempotencyKey:
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      }),
+    onSuccess: (result) => {
+      setRunError(null);
+      navigate(`/projects/${projectId}/executions/${result.executionId}`);
+    },
+    onError: (error: ApiError) => setRunError(error),
   });
 
   if (testCase.isLoading) {
@@ -259,6 +278,52 @@ export function TestCaseDetailsPage() {
               )}
               {!canManage && (
                 <p className="text-xs text-slate-400">Review requires the test-case manage permission.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Execution</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-slate-600">
+                {selectedVersion
+                  ? (
+                    <>
+                      Version v{selectedVersion.versionNumber} ·{' '}
+                      <Badge tone={reviewTone(selectedVersion.reviewStatus)}>
+                        {selectedVersion.reviewStatus}
+                      </Badge>
+                    </>
+                  )
+                  : 'No version selected.'}
+              </p>
+              {runError && (
+                <p role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {runError.code === 'CONFLICT'
+                    ? 'Only approved versions can be executed.'
+                    : `Run failed: ${runError.message}`}
+                </p>
+              )}
+              {canExecute && selectedVersion && selectedVersion.reviewStatus === 'Approved' && (
+                <Button
+                  variant="success"
+                  size="sm"
+                  disabled={run.isPending}
+                  onClick={() => run.mutate(selectedVersion.id)}
+                >
+                  <Play className="h-4 w-4" aria-hidden />
+                  {run.isPending ? 'Starting…' : `Run v${selectedVersion.versionNumber}`}
+                </Button>
+              )}
+              {canExecute && selectedVersion && selectedVersion.reviewStatus !== 'Approved' && (
+                <p className="text-xs text-slate-400" title="Only approved versions can be executed">
+                  Execution unlocks once this version is approved. The backend enforces this independently.
+                </p>
+              )}
+              {!canExecute && (
+                <p className="text-xs text-slate-400">Running tests requires the executions.execute permission.</p>
               )}
             </CardContent>
           </Card>

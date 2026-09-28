@@ -4,6 +4,8 @@ using System.Text;
 using AutoTestAi.Application.Identity;
 using AutoTestAi.Application.Projects;
 using AutoTestAi.Application.TestCases;
+using AutoTestAi.Application.TestExecution;
+using AutoTestAi.Infrastructure.Executions;
 using AutoTestAi.Infrastructure.Identity;
 using AutoTestAi.Infrastructure.Persistence;
 using AutoTestAi.Infrastructure.Projects;
@@ -61,6 +63,27 @@ public sealed class FakeWorkflowStarter : ITestExecutionWorkflowStarter
         => Task.FromResult($"wf-test-{executionId:N}");
 }
 
+/// <summary>Fake coordinator backing Slice-5 execution tests (records starts/cancels).</summary>
+public sealed class FakeWorkflowCoordinator : IExecutionWorkflowCoordinator
+{
+    public bool IsConfigured { get; set; } = true;
+    public readonly List<(Guid ExecutionId, Guid ProjectId)> Started = new();
+    public readonly List<string> Cancelled = new();
+    public Func<string, bool>? CancelHandler { get; set; }
+
+    public Task<string> StartAsync(Guid executionId, Guid projectId, CancellationToken ct)
+    {
+        Started.Add((executionId, projectId));
+        return Task.FromResult($"wf-test-{executionId:N}");
+    }
+
+    public Task<bool> CancelAsync(string workflowId, CancellationToken ct)
+    {
+        Cancelled.Add(workflowId);
+        return Task.FromResult(CancelHandler?.Invoke(workflowId) ?? true);
+    }
+}
+
 /// <summary>
 /// Slice-1 factory: real JwtBearer validation (HMAC, offline metadata),
 /// InMemory EF instead of Postgres, fake workflow starter.
@@ -68,6 +91,9 @@ public sealed class FakeWorkflowStarter : ITestExecutionWorkflowStarter
 public sealed class Slice1ApiFactory : WebApplicationFactory<Program>
 {
     private readonly string _databaseName = $"slice1-{Guid.NewGuid():N}";
+
+    /// <summary>Workflow coordinator fake shared by execution tests.</summary>
+    public FakeWorkflowCoordinator WorkflowCoordinator { get; } = new();
 
     static Slice1ApiFactory()
     {
@@ -128,6 +154,9 @@ public sealed class Slice1ApiFactory : WebApplicationFactory<Program>
             services.AddScoped<IProjectStore, EfProjectStore>();
             services.RemoveAll<ITestCaseStore>();
             services.AddScoped<ITestCaseStore, EfTestCaseStore>();
+            services.RemoveAll<IExecutionStore>();
+            services.AddScoped<IExecutionStore, EfExecutionStore>();
+            services.AddSingleton<IExecutionWorkflowCoordinator>(WorkflowCoordinator);
             services.RemoveAll<ITestExecutionWorkflowStarter>();
             services.AddSingleton<ITestExecutionWorkflowStarter>(new FakeWorkflowStarter());
         });

@@ -34,7 +34,8 @@ public enum ExecutionStatus
     Passed = 2,
     Failed = 3,
     Cancelled = 4,
-    Error = 5
+    Error = 5,
+    TimedOut = 6
 }
 
 public enum ExecutionTestStatus
@@ -44,7 +45,9 @@ public enum ExecutionTestStatus
     Passed = 2,
     Failed = 3,
     Skipped = 4,
-    Error = 5
+    Error = 5,
+    TimedOut = 6,
+    Cancelled = 7
 }
 
 public enum DefectStatus

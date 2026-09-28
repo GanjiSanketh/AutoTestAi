@@ -12,6 +12,8 @@ public sealed class ExecutionEventsTests
     [InlineData("ExecutionStarted", "ExecutionStarted")]
     [InlineData("ExecutionStatusChanged", "ExecutionStatusChanged")]
     [InlineData("ExecutionTestStarted", "ExecutionTestStarted")]
+    [InlineData("ExecutionStepStarted", "ExecutionStepStarted")]
+    [InlineData("ExecutionStepCompleted", "ExecutionStepCompleted")]
     [InlineData("ExecutionLogReceived", "ExecutionLogReceived")]
     [InlineData("ExecutionTestCompleted", "ExecutionTestCompleted")]
     [InlineData("FailureAnalysisCompleted", "FailureAnalysisCompleted")]

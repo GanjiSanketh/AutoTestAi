@@ -10,6 +10,8 @@ export const ExecutionEvent = {
   ExecutionStarted: 'ExecutionStarted',
   ExecutionStatusChanged: 'ExecutionStatusChanged',
   ExecutionTestStarted: 'ExecutionTestStarted',
+  ExecutionStepStarted: 'ExecutionStepStarted',
+  ExecutionStepCompleted: 'ExecutionStepCompleted',
   ExecutionLogReceived: 'ExecutionLogReceived',
   ExecutionTestCompleted: 'ExecutionTestCompleted',
   FailureAnalysisCompleted: 'FailureAnalysisCompleted',

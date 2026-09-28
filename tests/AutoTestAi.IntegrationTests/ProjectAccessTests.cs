@@ -93,10 +93,31 @@ public sealed class ProjectAccessTests : IClassFixture<Slice1ApiFactory>
     [Fact]
     public async Task StartExecution_MemberWithPermission_Returns202()
     {
+        // Slice 5: starting an execution binds one exact APPROVED version.
+        Guid versionId = Guid.Empty;
         await SeedOnceAsync();
+        await _factory.SeedAsync(db =>
+        {
+            var testCase = new TestCase
+            {
+                ProjectId = _projectId, TestKey = "RUN-001", Title = "Runnable",
+                Priority = Priority.High, Status = TestCaseStatus.Active, SourceType = "manual",
+            };
+            db.TestCases.Add(testCase);
+            var version = new TestCaseVersion
+            {
+                TestCaseId = testCase.Id, VersionNumber = 1, SourceCode = "// v1",
+                StructuredSteps = System.Text.Json.JsonDocument.Parse(
+                    """[{"order":1,"action":"navigate","target":"https://example.test"}]"""),
+                ReviewStatus = ReviewStatus.Approved,
+            };
+            db.TestCaseVersions.Add(version);
+            versionId = version.Id;
+            return Task.CompletedTask;
+        });
         var token = TestTokens.Create("slice1-member", ["tester"]);
         var response = await Client(token)
-            .PostAsJsonAsync($"/api/v1/projects/{_projectId}/executions", new { });
+            .PostAsJsonAsync($"/api/v1/projects/{_projectId}/executions", new { testCaseVersionId = versionId });
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
     }
 

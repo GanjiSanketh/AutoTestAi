@@ -1,5 +1,5 @@
 using AutoTestAi.Infrastructure.Cache;
-using AutoTestAi.Infrastructure.Storage;
+using AutoTestAi.Application.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;

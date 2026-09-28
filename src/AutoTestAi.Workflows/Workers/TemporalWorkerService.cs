@@ -1,5 +1,6 @@
 using AutoTestAi.Workflows.Configuration;
 using AutoTestAi.Workflows.Workflows;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -15,11 +16,16 @@ namespace AutoTestAi.Workflows.Workers;
 public sealed class TemporalWorkerService : BackgroundService
 {
     private readonly TemporalOptions _options;
+    private readonly IServiceScopeFactory _scopes;
     private readonly ILogger<TemporalWorkerService> _logger;
 
-    public TemporalWorkerService(IOptions<TemporalOptions> options, ILogger<TemporalWorkerService> logger)
+    public TemporalWorkerService(
+        IOptions<TemporalOptions> options,
+        IServiceScopeFactory scopes,
+        ILogger<TemporalWorkerService> logger)
     {
         _options = options.Value;
+        _scopes = scopes;
         _logger = logger;
     }
 
@@ -40,7 +46,7 @@ public sealed class TemporalWorkerService : BackgroundService
                 client,
                 new TemporalWorkerOptions(_options.TaskQueue)
                     .AddWorkflow<TestExecutionWorkflow>()
-                    .AddAllActivities(new TestExecutionActivities()));
+                    .AddAllActivities(new TestExecutionActivities(_scopes)));
             _logger.LogInformation(
                 "Temporal worker listening on queue {TaskQueue} (namespace {Namespace}).",
                 _options.TaskQueue, _options.Namespace);

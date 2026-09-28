@@ -29,6 +29,10 @@ builder.Services.Configure<CorsOptions>(
     builder.Configuration.GetSection(CorsOptions.SectionName));
 builder.Services.Configure<AutoTestAi.Application.AI.AiOptions>(
     builder.Configuration.GetSection(AutoTestAi.Application.AI.AiOptions.SectionName));
+builder.Services.Configure<AutoTestAi.Application.TestExecution.ExecutionOptions>(
+    builder.Configuration.GetSection(AutoTestAi.Application.TestExecution.ExecutionOptions.SectionName));
+builder.Services.Configure<AutoTestAi.Application.TestExecution.WorkerOptions>(
+    builder.Configuration.GetSection(AutoTestAi.Application.TestExecution.WorkerOptions.SectionName));
 builder.Services.Configure<ObservabilityOptions>(
     builder.Configuration.GetSection(ObservabilityOptions.SectionName));
 
@@ -124,6 +128,7 @@ else
 builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, HttpCurrentUserService>();
+builder.Services.AddScoped<AutoTestAi.Application.TestExecution.IExecutionEventPublisher, AutoTestAi.Api.Hubs.SignalRExecutionEventPublisher>();
 
 // ---------- health (STEP 21) ----------
 builder.Services.AddHealthChecks()
@@ -204,6 +209,7 @@ app.MapAuthEndpoints();
 app.MapProjectEndpoints();
 app.MapTestCaseEndpoints();
 app.MapTestGenerationEndpoints();
+app.MapExecutionEndpoints();
 app.MapHub<ExecutionHub>("/hubs/execution");
 
 if (!authOptions.Configured)

@@ -1,9 +1,12 @@
 using AutoTestAi.Application.AI;
 using AutoTestAi.Application.Identity;
 using AutoTestAi.Application.Projects;
+using AutoTestAi.Application.Storage;
 using AutoTestAi.Application.TestCases;
+using AutoTestAi.Application.TestExecution;
 using AutoTestAi.Infrastructure.AI;
 using AutoTestAi.Infrastructure.Cache;
+using AutoTestAi.Infrastructure.Executions;
 using AutoTestAi.Infrastructure.Identity;
 using AutoTestAi.Infrastructure.Persistence;
 using AutoTestAi.Infrastructure.Projects;
@@ -39,6 +42,7 @@ public static class DependencyInjection
             services.AddScoped<IUserDirectory, EfUserDirectory>();
             services.AddScoped<IProjectStore, EfProjectStore>();
             services.AddScoped<ITestCaseStore, EfTestCaseStore>();
+            services.AddScoped<IExecutionStore, EfExecutionStore>();
         }
         else
         {
@@ -49,6 +53,7 @@ public static class DependencyInjection
             services.AddSingleton<IUserDirectory, NullUserDirectory>();
             services.AddSingleton<IProjectStore, UnavailableProjectStore>();
             services.AddSingleton<ITestCaseStore, UnavailableTestCaseStore>();
+            services.AddSingleton<IExecutionStore, Executions.UnavailableExecutionStore>();
         }
 
         // Dapper remains referenced for future read-model queries (docs/04);
@@ -63,6 +68,10 @@ public static class DependencyInjection
         services.AddHttpClient("ai-openai");
         services.AddTransient<IAiProvider, OllamaAiProvider>();
         services.AddTransient<IAiProvider, OpenAiAiProvider>();
+
+        // Playwright execution plane (Slice 5 §36): HTTP boundary, token server-side.
+        services.AddHttpClient("playwright-worker");
+        services.AddTransient<IPlaywrightWorkerClient, Executions.PlaywrightWorkerClient>();
 
         return services;
     }

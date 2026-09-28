@@ -88,6 +88,26 @@ Domain must not depend on infrastructure implementations.
 
 The API must never execute arbitrary Playwright/Appium/test code directly. Workers run in isolated containers. A worker receives only the execution ID, test revision, environment reference, approved secret references, and execution policy. It returns status, structured result, logs and artifacts.
 
+Slice-5 execution planes (no second orchestrator — Temporal is the only one):
+
+```text
+ASP.NET Core (control/API plane)
+  → Temporal (durable workflow orchestration: TestExecutionWorkflow)
+  → Playwright worker (execution plane: controlled TestStep interpreter)
+  → PostgreSQL (authoritative results) + MinIO/S3 (artifact bytes) + SignalR (live events)
+```
+
+The MVP engine executes the structured TestStep contract
+(order/action/target/value) through an explicit action vocabulary
+(navigate, click, fill, type, select, check, uncheck, press, wait,
+assertVisible, assertText, assertValue, screenshot). Generated `sourceCode` is
+displayed for review but is NEVER executed — no eval, no Function
+constructor, no child_process, no dynamic imports of untrusted files.
+Unknown actions fail as automation failures. Approval is the SSRF control:
+the worker navigates only URLs from Approved versions; password-like step
+values travel and persist as `[REDACTED]` (real secret injection is future
+work requiring a vault design).
+
 ## 6. AI Provider Abstraction
 
 Business modules depend on an internal abstraction, not vendor SDKs.

@@ -1,3 +1,4 @@
+using AutoTestAi.Application.TestExecution;
 using AutoTestAi.Workflows.Abstractions;
 using AutoTestAi.Workflows.Configuration;
 using AutoTestAi.Workflows.Workers;
@@ -14,6 +15,7 @@ public static class DependencyInjection
     {
         services.Configure<TemporalOptions>(configuration.GetSection(TemporalOptions.SectionName));
         services.AddSingleton<ITestExecutionWorkflowStarter, TemporalWorkflowStarter>();
+        services.AddSingleton<IExecutionWorkflowCoordinator, TemporalExecutionWorkflowCoordinator>();
         services.AddHostedService<TemporalWorkerService>();
         return services;
     }

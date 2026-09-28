@@ -213,16 +213,68 @@ analysis (`AnalyzeFailureAsync`) stays unimplemented until Slice 6.
 
 ## 8. Execution
 
+Implemented in Phase 1 Slice 5. Executions bind exactly one immutable
+`TestCaseVersion` — never "latest". Only `Approved` versions may execute
+(`409` otherwise); archived test cases and empty step lists are rejected.
+History is immutable: reruns create new executions.
+
 ```http
-GET  /api/v1/projects/{projectId}/executions
 POST /api/v1/projects/{projectId}/executions
-GET  /api/v1/executions/{executionId}
-POST /api/v1/executions/{executionId}/cancel
-GET  /api/v1/executions/{executionId}/tests
-GET  /api/v1/execution-tests/{executionTestId}/logs
-GET  /api/v1/execution-tests/{executionTestId}/artifacts
-GET  /api/v1/execution-tests/{executionTestId}/failure-analysis
+GET  /api/v1/projects/{projectId}/executions?page=&pageSize=&status=&testCaseId=
+GET  /api/v1/projects/{projectId}/executions/{executionId}
+GET  /api/v1/projects/{projectId}/executions/{executionId}/steps
+GET  /api/v1/projects/{projectId}/executions/{executionId}/logs?afterId=&take=
+GET  /api/v1/projects/{projectId}/executions/{executionId}/artifacts
+GET  /api/v1/projects/{projectId}/executions/{executionId}/artifacts/{artifactId}/download
+POST /api/v1/projects/{projectId}/executions/{executionId}/cancel
 ```
+
+Start request (exact version only — no scripts, paths, or credentials accepted):
+
+```json
+{
+  "testCaseVersionId": "uuid",
+  "environmentId": "uuid (optional, must belong to the project)",
+  "browser": "chromium",
+  "idempotencyKey": "optional client key (repeat returns the original, 200)"
+}
+```
+
+Start response (`→ 202`, `200` when an idempotency key repeats):
+
+```json
+{
+  "executionId": "uuid",
+  "executionTestId": "uuid",
+  "projectId": "uuid",
+  "testCaseId": "uuid",
+  "testCaseVersionId": "uuid",
+  "status": "Queued",
+  "workflowId": "test-execution-<id>",
+  "createdAt": "...",
+  "duplicated": false
+}
+```
+
+Rules: `executions.execute` gates start, `executions.cancel` gates cancel,
+`executions.read` gates reads; every route additionally requires membership
+(admin bypass). Unknown/inaccessible executions return `403`, never `404`
+(genuine 404 only after the boundary, e.g. admins). Status lifecycle:
+Queued → Running → Passed/Failed/Cancelled/TimedOut/Error; terminal states
+are final. Cancel is idempotent: Queued cancels immediately; Running asks
+Temporal to cancel and the workflow persists the terminal state; terminal
+executions return their status unchanged. Validation failures → `400`;
+unapproved/archived/empty versions → `409`; Temporal or storage unavailable →
+`503`. Step values on password-like targets persist as `[REDACTED]`;
+artifact download returns a short-lived server-minted presigned URL
+(`{downloadUrl, expiresInSeconds}`) — storage credentials never reach clients.
+
+Live events on `/hubs/execution` (authorized subscription per execution):
+`ExecutionStarted`, `ExecutionStatusChanged`, `ExecutionTestStarted`,
+`ExecutionStepStarted`, `ExecutionStepCompleted`, `ExecutionLogReceived`
+(bounded batches), `ExecutionTestCompleted`, `ExecutionCompleted`,
+`ExecutionFailed`. Payloads carry no secrets. REST remains authoritative;
+SignalR is the live-update mechanism.
 
 ## 9. Bugs
 

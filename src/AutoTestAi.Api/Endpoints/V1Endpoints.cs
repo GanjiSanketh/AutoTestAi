@@ -1,9 +1,7 @@
 using System.Reflection;
 using AutoTestAi.Api.Health;
-using AutoTestAi.Api.Hubs;
-using AutoTestAi.Application.Authorization;
+using AutoTestAi.Application.Storage;
 using AutoTestAi.Infrastructure.Cache;
-using AutoTestAi.Infrastructure.Storage;
 using AutoTestAi.Workflows.Abstractions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -15,10 +13,8 @@ public sealed record ApiHealthReport(
     string Version,
     DateTimeOffset Timestamp,
     IReadOnlyList<DependencyState> Dependencies);
-public sealed record StartExecutionRequest(Guid? SuiteId, Guid? EnvironmentId, IReadOnlyList<Guid>? TestCaseIds);
-public sealed record StartExecutionResponse(Guid ExecutionId, string WorkflowId, string Status);
 
-/// <summary>Versioned API surface (/api/v1). Phase 0 proves the foundation only.</summary>
+/// <summary>Versioned API surface (/api/v1). Execution routes live in ExecutionEndpoints.</summary>
 public static class V1Endpoints
 {
     public static IEndpointRouteBuilder MapV1Endpoints(this IEndpointRouteBuilder app)
@@ -46,30 +42,6 @@ public static class V1Endpoints
             .WithName("GetApiHealth")
             .WithSummary("Phase-0 API health including dependency states.")
             .AllowAnonymous();
-
-        // Proves API → Temporal initiation. Slice 1 adds the authorization
-        // boundary (authenticated + executions.execute + project member);
-        // full persistence lands in Phase 2+.
-        v1.MapPost("/projects/{projectId:guid}/executions", async (
-                Guid projectId,
-                StartExecutionRequest? request,
-                IAuthorizationService authorization,
-                ITestExecutionWorkflowStarter starter,
-                CancellationToken cancellationToken) =>
-            {
-                if (projectId == Guid.Empty)
-                    throw new ArgumentException("Project id must not be empty.", nameof(projectId));
-                await authorization.RequireProjectAccessAsync(
-                    projectId, Permissions.ExecutionsExecute, cancellationToken);
-                var executionId = Guid.NewGuid();
-                var workflowId = await starter.StartTestExecutionAsync(executionId, projectId, cancellationToken);
-                return Results.Accepted(
-                    $"/api/v1/executions/{executionId}",
-                    new StartExecutionResponse(executionId, workflowId, "Queued"));
-            })
-            .WithName("StartExecution")
-            .WithSummary("Start the TestExecutionWorkflow for a project (authorized).")
-            .RequireAuthorization();
 
         return app;
     }

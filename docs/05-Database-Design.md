@@ -58,16 +58,19 @@ users/projects → audit_events
 `suite_id FK`, `test_case_id FK`, `execution_order`, composite PK.
 
 ### executions
-`id UUID PK`, `project_id FK`, `suite_id`, `status`, `trigger_type`, `environment_id`, `workflow_id`, `started_at`, `completed_at`, `created_by`, `created_at`.
+`id UUID PK`, `project_id FK`, `suite_id`, `status`, `trigger_type`, `environment_id`, `workflow_id`, `idempotency_key NULL` (unique per project when set), `started_at`, `completed_at`, `created_by`, `created_at`.
 
 ### execution_tests
-`id UUID PK`, `execution_id FK`, `test_case_id FK`, `test_case_version_id FK`, `status`, `worker_id`, `attempt`, timestamps, `duration_ms`, `error_type`, `error_message`.
+`id UUID PK`, `execution_id FK`, `test_case_id FK`, `test_case_version_id FK` (exact immutable version bound at creation — never re-resolved), `status`, `worker_id`, `attempt`, `framework`, `browser`, `failure_classification` (`Unknown` until terminal), timestamps, `duration_ms`, `error_type`, `error_message`.
+
+### execution_step_results (Slice 5)
+`id UUID PK`, `execution_test_id FK`, `step_order`, `action`, `target`, `status`, `started_at`, `completed_at`, `duration_ms`, `error_message`. Step `value` fields are intentionally NOT persisted (password-like values would leak); index `(execution_test_id,step_order)`.
 
 ### execution_logs
-`id BIGSERIAL PK`, `execution_test_id FK`, `timestamp`, `level`, `message`, `metadata JSONB`.
+`id BIGSERIAL PK`, `execution_test_id FK`, `timestamp`, `level`, `message`, `metadata JSONB`. Bounded chronological reads via `(execution_test_id, id)` cursor.
 
 ### execution_artifacts
-`id UUID PK`, `execution_test_id FK`, `artifact_type`, `storage_key`, `content_type`, `size_bytes`, `created_at`.
+`id UUID PK`, `execution_test_id FK`, `artifact_type`, `storage_key`, `file_name`, `step_order NULL`, `content_type`, `size_bytes`, `created_at`. Bytes live in MinIO/S3 under deterministic keys (`projects/{project}/executions/{execution}/tests/{test}/step-{order}-{file}`); downloads use short-lived server-minted presigned URLs.
 
 ### failure_analyses
 `id UUID PK`, `execution_test_id FK`, `classification`, `root_cause`, `evidence JSONB`, `confidence NUMERIC(5,4)`, `provider`, `model`, `created_at`.

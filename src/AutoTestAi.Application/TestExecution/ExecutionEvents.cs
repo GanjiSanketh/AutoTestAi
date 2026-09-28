@@ -9,6 +9,8 @@ public static class ExecutionEvents
     public const string ExecutionStarted = "ExecutionStarted";
     public const string ExecutionStatusChanged = "ExecutionStatusChanged";
     public const string ExecutionTestStarted = "ExecutionTestStarted";
+    public const string ExecutionStepStarted = "ExecutionStepStarted";
+    public const string ExecutionStepCompleted = "ExecutionStepCompleted";
     public const string ExecutionLogReceived = "ExecutionLogReceived";
     public const string ExecutionTestCompleted = "ExecutionTestCompleted";
     public const string FailureAnalysisCompleted = "FailureAnalysisCompleted";
