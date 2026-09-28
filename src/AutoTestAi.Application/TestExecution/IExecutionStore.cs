@@ -1,4 +1,5 @@
 using AutoTestAi.Domain.Entities;
+using DomainFailureAnalysis = AutoTestAi.Domain.Entities.FailureAnalysis;
 
 namespace AutoTestAi.Application.TestExecution;
 
@@ -66,4 +67,16 @@ public interface IExecutionStore
     Task AddArtifactAsync(ExecutionArtifact artifact, CancellationToken ct);
 
     Task DeleteArtifactsAsync(Guid executionTestId, CancellationToken ct);
+
+    // ---------- failure analyses (attempt history, never overwritten) ----------
+
+    Task<IReadOnlyList<DomainFailureAnalysis>> ListAnalysesAsync(Guid executionTestId, CancellationToken ct);
+
+    Task<DomainFailureAnalysis?> GetAnalysisByIdAsync(Guid analysisId, CancellationToken ct);
+
+    /// <summary>
+    /// Persists a Running attempt. Throws <see cref="Common.ConflictException"/>
+    /// when another Running attempt already exists (unique filtered index).
+    /// </summary>
+    Task AddAnalysisAsync(DomainFailureAnalysis analysis, CancellationToken ct);
 }

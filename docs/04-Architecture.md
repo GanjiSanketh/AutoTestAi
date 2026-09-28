@@ -108,6 +108,19 @@ the worker navigates only URLs from Approved versions; password-like step
 values travel and persist as `[REDACTED]` (real secret injection is future
 work requiring a vault design).
 
+Slice-6 failure analysis and defects (advisory AI, human-owned bugs):
+
+```text
+Failed execution → bounded redacted evidence → IAiProvider.AnalyzeFailureAsync
+  → validated advisory analysis (attempt history, never overwrites)
+  → human review → explicit defect creation (bugs.manage)
+```
+
+Analysis never mutates execution history and never creates defects; defects
+derive project/execution/test/version relationships server-side from the
+referenced failed execution. External ticketing (Jira/Azure DevOps) is a
+later slice; defects are internal records until then.
+
 ## 6. AI Provider Abstraction
 
 Business modules depend on an internal abstraction, not vendor SDKs.

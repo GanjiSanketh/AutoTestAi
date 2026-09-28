@@ -1,4 +1,5 @@
 using AutoTestAi.Application.AI;
+using AutoTestAi.Application.Defects;
 using AutoTestAi.Application.Identity;
 using AutoTestAi.Application.Projects;
 using AutoTestAi.Application.Storage;
@@ -43,6 +44,7 @@ public static class DependencyInjection
             services.AddScoped<IProjectStore, EfProjectStore>();
             services.AddScoped<ITestCaseStore, EfTestCaseStore>();
             services.AddScoped<IExecutionStore, EfExecutionStore>();
+            services.AddScoped<IDefectStore, Defects.EfDefectStore>();
         }
         else
         {
@@ -54,6 +56,7 @@ public static class DependencyInjection
             services.AddSingleton<IProjectStore, UnavailableProjectStore>();
             services.AddSingleton<ITestCaseStore, UnavailableTestCaseStore>();
             services.AddSingleton<IExecutionStore, Executions.UnavailableExecutionStore>();
+            services.AddSingleton<IDefectStore, Defects.UnavailableDefectStore>();
         }
 
         // Dapper remains referenced for future read-model queries (docs/04);

@@ -1,8 +1,8 @@
 using System.Net;
-using System.Net;
 using System.Text.Json;
 using AutoTestAi.Application.AI;
 using AutoTestAi.Application.Common;
+using AutoTestAi.Application.FailureAnalysis;
 using AutoTestAi.Application.TestGeneration;
 using AutoTestAi.Infrastructure.AI;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -61,12 +61,14 @@ public sealed class AiProviderAdapterTests
         new FakeFactory(new HttpClient(handler)),
         Options.Create(options),
         new AiTestGenerationPromptBuilder(),
+        new AiFailureAnalysisPromptBuilder(),
         NullLogger<OllamaAiProvider>.Instance);
 
     private static OpenAiAiProvider OpenAi(FakeHttpHandler handler, AiOptions options) => new(
         new FakeFactory(new HttpClient(handler)),
         Options.Create(options),
         new AiTestGenerationPromptBuilder(),
+        new AiFailureAnalysisPromptBuilder(),
         NullLogger<OpenAiAiProvider>.Instance);
 
     // ---------- Ollama ----------
@@ -241,14 +243,161 @@ public sealed class AiProviderAdapterTests
         Assert.Equal(AiProviderErrorKind.RateLimited, ex.Kind);
     }
 
-    [Fact]
-    public async Task ProviderAnalyzers_RemainUnimplemented_InThisSlice()
+    // ---------- failure analysis (Slice 6) ----------
+
+    private static AiFailureAnalysisRequest AnalysisRequest() => new(
+        Guid.NewGuid(), "AssertionError", "Expected text 'Welcome' but found ''.",
+        "Successful user login",
+        new AiFailureAnalysisContext(
+            Guid.NewGuid(), Guid.NewGuid(), "LOGIN-001", "Successful user login",
+            "playwright", "web", "chromium", "TestFailure",
+            "step 2 (assertText) Failed: Expected text 'Welcome' but found ''.",
+            new[] { new AiFailureEvidenceStep(2, "assertText", "#heading", "Failed", "Expected text") },
+            new[] { new AiFailureEvidenceLog("info", "step 2 failed") },
+            1, new[] { "step-2-failure.png" }, 1, false));
+
+    private static string AnalysisContent() => ModelJson(new
     {
-        var ollama = Ollama(new FakeHttpHandler(), new AiOptions());
-        var openai = OpenAi(new FakeHttpHandler(), new AiOptions());
-        await Assert.ThrowsAsync<NotSupportedException>(() => ollama.AnalyzeFailureAsync(
-            new AiFailureAnalysisRequest(Guid.NewGuid(), null, null, null), CancellationToken.None));
-        await Assert.ThrowsAsync<NotSupportedException>(() => openai.AnalyzeFailureAsync(
-            new AiFailureAnalysisRequest(Guid.NewGuid(), null, null, null), CancellationToken.None));
+        classification = "TestFailure",
+        summary = "The heading assertion failed because the text did not match.",
+        probableCause = "The expected heading text differs from the rendered page.",
+        confidence = 0.75,
+        evidence = new[] { "step 2 assertText failed" },
+        assumptions = new[] { "The page under test is the login page." },
+        warnings = new[] { "Only one log line was available." },
+        recommendedAction = "Inspect the heading selector and expected text.",
+        isLikelyDefect = false,
+    });
+
+    [Fact]
+    public async Task Ollama_Analyze_ReturnsStructuredResult()
+    {
+        var handler = new FakeHttpHandler();
+        handler.Responder = (_, _) => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(ModelJson(new
+            {
+                message = new { content = AnalysisContent() },
+                prompt_eval_count = 80,
+                eval_count = 120,
+            })),
+        };
+        var provider = Ollama(handler, new AiOptions { Provider = "ollama", Model = "qwen3:8b" });
+
+        var result = await provider.AnalyzeFailureAsync(AnalysisRequest(), CancellationToken.None);
+
+        Assert.Equal("ollama", result.Provider);
+        Assert.Equal("TestFailure", result.Classification);
+        Assert.Equal(0.75m, result.Confidence);
+        Assert.False(result.IsLikelyDefect);
+        Assert.Equal("failure-analysis-v1", result.PromptVersion);
+        Assert.Equal(80, result.InputTokens);
+        Assert.Single(result.Assumptions!);
+    }
+
+    [Fact]
+    public async Task OpenAi_Analyze_ReturnsStructuredResult_WithUsage()
+    {
+        var handler = new FakeHttpHandler();
+        handler.Responder = (_, _) => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(ModelJson(new
+            {
+                choices = new[] { new { message = new { content = AnalysisContent() } } },
+                usage = new { prompt_tokens = 300, completion_tokens = 150, total_tokens = 450 },
+            })),
+        };
+        var provider = OpenAi(handler, new AiOptions
+        {
+            Provider = "openai", Model = "gpt-4o-mini", ApiKey = "sk-test-key",
+        });
+
+        var result = await provider.AnalyzeFailureAsync(AnalysisRequest(), CancellationToken.None);
+
+        Assert.Equal("openai", result.Provider);
+        Assert.Equal("TestFailure", result.Classification);
+        Assert.Equal(300, result.InputTokens);
+        Assert.Equal(450, result.TotalTokens);
+    }
+
+    [Fact]
+    public async Task Analyze_MalformedModelOutput_MapsToMalformed()
+    {
+        const string content = "not json at all {{{";
+        var ollamaHandler = new FakeHttpHandler();
+        ollamaHandler.Responder = (_, _) => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(ModelJson(new { message = new { content } })),
+        };
+        var ollamaEx = await Assert.ThrowsAsync<AiProviderException>(() => Ollama(
+            ollamaHandler, new AiOptions { Provider = "ollama", Model = "m" })
+            .AnalyzeFailureAsync(AnalysisRequest(), CancellationToken.None));
+        Assert.Equal(AiProviderErrorKind.MalformedResponse, ollamaEx.Kind);
+
+        var openaiHandler = new FakeHttpHandler();
+        openaiHandler.Responder = (_, _) => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(ModelJson(new
+            {
+                choices = new[] { new { message = new { content } } },
+            })),
+        };
+        var openaiEx = await Assert.ThrowsAsync<AiProviderException>(() => OpenAi(
+            openaiHandler, new AiOptions { Provider = "openai", Model = "m", ApiKey = "sk-test" })
+            .AnalyzeFailureAsync(AnalysisRequest(), CancellationToken.None));
+        Assert.Equal(AiProviderErrorKind.MalformedResponse, openaiEx.Kind);
+    }
+
+    [Fact]
+    public async Task Analyze_MissingRequiredFields_MapsToMalformed()
+    {
+        var handler = new FakeHttpHandler();
+        handler.Responder = (_, _) => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(ModelJson(new
+            {
+                message = new { content = ModelJson(new { summary = "only a summary" }) },
+            })),
+        };
+        var ex = await Assert.ThrowsAsync<AiProviderException>(() => Ollama(
+            handler, new AiOptions { Provider = "ollama", Model = "m" })
+            .AnalyzeFailureAsync(AnalysisRequest(), CancellationToken.None));
+        Assert.Equal(AiProviderErrorKind.MalformedResponse, ex.Kind);
+    }
+
+    [Fact]
+    public async Task Analyze_UnauthorizedAndRateLimited_MapKinds_WithoutLeakingKey()
+    {
+        const string key = "sk-live-analysis-key";
+        var denied = new FakeHttpHandler();
+        denied.Responder = (_, _) => new HttpResponseMessage(HttpStatusCode.Unauthorized);
+        var deniedEx = await Assert.ThrowsAsync<AiProviderException>(() => OpenAi(
+            denied, new AiOptions { Provider = "openai", Model = "m", ApiKey = key })
+            .AnalyzeFailureAsync(AnalysisRequest(), CancellationToken.None));
+        Assert.Equal(AiProviderErrorKind.Unavailable, deniedEx.Kind);
+        Assert.DoesNotContain(key, deniedEx.Message, StringComparison.Ordinal);
+
+        var limited = new FakeHttpHandler();
+        limited.Responder = (_, _) => new HttpResponseMessage((HttpStatusCode)429);
+        var limitedEx = await Assert.ThrowsAsync<AiProviderException>(() => OpenAi(
+            limited, new AiOptions { Provider = "openai", Model = "m", ApiKey = key })
+            .AnalyzeFailureAsync(AnalysisRequest(), CancellationToken.None));
+        Assert.Equal(AiProviderErrorKind.RateLimited, limitedEx.Kind);
+    }
+
+    [Fact]
+    public async Task Analyze_CancelledToken_AbortsWithoutTimeoutMapping()
+    {
+        var handler = new FakeHttpHandler();
+        handler.Responder = (_, ct) =>
+        {
+            ct.ThrowIfCancellationRequested();
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Ollama(
+            handler, new AiOptions { Provider = "ollama", Model = "m" })
+            .AnalyzeFailureAsync(AnalysisRequest(), cts.Token));
     }
 }

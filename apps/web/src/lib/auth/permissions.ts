@@ -12,6 +12,7 @@ export const Permissions = {
   ExecutionsRead: 'executions.read',
   ExecutionsExecute: 'executions.execute',
   ExecutionsCancel: 'executions.cancel',
+  ExecutionsAnalyze: 'executions.analyze',
   BugsRead: 'bugs.read',
   BugsManage: 'bugs.manage',
   TicketsRead: 'tickets.read',

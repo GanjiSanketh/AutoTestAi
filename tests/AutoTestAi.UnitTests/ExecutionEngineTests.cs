@@ -28,6 +28,7 @@ public sealed class ExecutionEngineTests
         public readonly List<ExecutionStepResult> Steps = new();
         public readonly List<ExecutionLog> Logs = new();
         public readonly List<ExecutionArtifact> Artifacts = new();
+        public readonly List<FailureAnalysis> Analyses = new();
         private long _logId;
 
         public Task<Execution?> GetExecutionByIdAsync(Guid id, CancellationToken ct)
@@ -54,6 +55,17 @@ public sealed class ExecutionEngineTests
         public Task AddArtifactAsync(ExecutionArtifact a, CancellationToken ct) { Artifacts.Add(a); return Task.CompletedTask; }
         public Task DeleteArtifactsAsync(Guid id, CancellationToken ct)
         { Artifacts.RemoveAll(a => a.ExecutionTestId == id); return Task.CompletedTask; }
+        public Task<IReadOnlyList<FailureAnalysis>> ListAnalysesAsync(Guid id, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<FailureAnalysis>>(Analyses.Where(a => a.ExecutionTestId == id).ToList());
+        public Task<FailureAnalysis?> GetAnalysisByIdAsync(Guid id, CancellationToken ct)
+            => Task.FromResult(Analyses.FirstOrDefault(a => a.Id == id));
+        public Task AddAnalysisAsync(FailureAnalysis a, CancellationToken ct)
+        {
+            if (Analyses.Any(x => x.ExecutionTestId == a.ExecutionTestId && x.Status == AnalysisStatus.Running))
+                throw new ConflictException("A failure analysis is already running for this execution test.");
+            Analyses.Add(a);
+            return Task.CompletedTask;
+        }
         public Task<int> CountAsync(Guid p, string? s, Guid? t, CancellationToken ct) => throw new NotImplementedException();
         public Task<IReadOnlyList<ExecutionListRow>> ListAsync(Guid p, string? s, Guid? t, int sk, int ta, CancellationToken ct) => throw new NotImplementedException();
         public Task<ExecutionTest?> GetExecutionTestByIdAsync(Guid id, CancellationToken ct) => throw new NotImplementedException();

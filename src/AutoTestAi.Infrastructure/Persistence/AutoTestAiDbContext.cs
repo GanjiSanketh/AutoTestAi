@@ -110,12 +110,25 @@ public sealed class AutoTestAiDbContext : DbContext
         modelBuilder.Entity<ExecutionArtifact>().Property(a => a.FileName).HasMaxLength(255);
         modelBuilder.Entity<FailureAnalysis>().ToTable("failure_analyses");
         modelBuilder.Entity<FailureAnalysis>().HasIndex(f => f.ExecutionTestId);
+        modelBuilder.Entity<FailureAnalysis>()
+            .HasIndex(f => f.ExecutionTestId)
+            .IsUnique()
+            .HasFilter("\"Status\" = 'Running'");
+        modelBuilder.Entity<FailureAnalysis>().HasIndex(f => new { f.ExecutionTestId, f.Attempt }).IsUnique();
+        modelBuilder.Entity<FailureAnalysis>().Property(f => f.Status).HasConversion<string>();
         modelBuilder.Entity<FailureAnalysis>().Property(f => f.Classification).HasConversion<string>();
         modelBuilder.Entity<FailureAnalysis>().Property(f => f.Evidence).HasColumnType("jsonb");
+        modelBuilder.Entity<FailureAnalysis>().Property(f => f.Summary).HasMaxLength(500);
+        modelBuilder.Entity<FailureAnalysis>().Property(f => f.RootCause).HasMaxLength(2000);
+        modelBuilder.Entity<FailureAnalysis>().Property(f => f.RecommendedAction).HasMaxLength(500);
+        modelBuilder.Entity<FailureAnalysis>().Property(f => f.PromptVersion).HasMaxLength(100);
+        modelBuilder.Entity<FailureAnalysis>().Property(f => f.Model).HasMaxLength(200);
+        modelBuilder.Entity<FailureAnalysis>().Property(f => f.Provider).HasMaxLength(100);
 
         // --- defects / tickets / integrations ---
         modelBuilder.Entity<Defect>().ToTable("defects");
         modelBuilder.Entity<Defect>().HasIndex(d => new { d.ProjectId, d.Status });
+        modelBuilder.Entity<Defect>().HasIndex(d => d.ExecutionTestId);
         modelBuilder.Entity<Defect>().Property(d => d.Status).HasConversion<string>();
         modelBuilder.Entity<Defect>().Property(d => d.Severity).HasConversion<string>();
         modelBuilder.Entity<Defect>().Property(d => d.RootCauseType).HasConversion<string>();

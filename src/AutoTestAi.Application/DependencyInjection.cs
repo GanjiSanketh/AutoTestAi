@@ -2,6 +2,8 @@ using AutoTestAi.Application.AI;
 using AutoTestAi.Application.Audit;
 using AutoTestAi.Application.Authorization;
 using AutoTestAi.Application.Common;
+using AutoTestAi.Application.Defects;
+using AutoTestAi.Application.FailureAnalysis;
 using AutoTestAi.Application.Projects;
 using AutoTestAi.Application.TestCases;
 using AutoTestAi.Application.TestExecution;
@@ -22,7 +24,9 @@ public static class DependencyInjection
         services.AddSingleton<IAiProvider, StubAiProvider>();
         services.AddSingleton<IAiProviderResolver, AiProviderResolver>();
         services.AddSingleton<IAiTestGenerationPromptBuilder, AiTestGenerationPromptBuilder>();
+        services.AddSingleton<IAiFailureAnalysisPromptBuilder, AiFailureAnalysisPromptBuilder>();
         services.AddSingleton<AiGenerationValidator>();
+        services.AddSingleton<AiAnalysisValidator>();
         services.AddSingleton<AiGenerationRateLimiter>();
         services.AddScoped<IAuthorizationService, AuthorizationService>();
         services.AddScoped<IExecutionSubscriptionAuthorizer, ExecutionSubscriptionAuthorizer>();
@@ -30,6 +34,9 @@ public static class DependencyInjection
         services.AddScoped<ITestCaseService, TestCaseService>();
         services.AddScoped<ITestExecutionService, TestExecutionService>();
         services.AddScoped<IExecutionEngine, ExecutionEngine>();
+        services.AddScoped<IFailureEvidenceService, FailureEvidenceService>();
+        services.AddScoped<IFailureAnalysisService, FailureAnalysisService>();
+        services.AddScoped<IDefectService, DefectService>();
         services.AddScoped<IAiTestGenerator, TestGenerationService>();
         services.AddScoped<IAuditService, AuditService>();
         return services;

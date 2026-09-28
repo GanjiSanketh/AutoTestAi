@@ -46,4 +46,9 @@ public sealed class UnavailableExecutionStore : IExecutionStore
         => Unavailable<ExecutionArtifact?>();
     public Task AddArtifactAsync(ExecutionArtifact artifact, CancellationToken ct) => Unavailable();
     public Task DeleteArtifactsAsync(Guid executionTestId, CancellationToken ct) => Unavailable();
+    public Task<IReadOnlyList<FailureAnalysis>> ListAnalysesAsync(Guid executionTestId, CancellationToken ct)
+        => Unavailable<IReadOnlyList<FailureAnalysis>>();
+    public Task<FailureAnalysis?> GetAnalysisByIdAsync(Guid analysisId, CancellationToken ct)
+        => Unavailable<FailureAnalysis?>();
+    public Task AddAnalysisAsync(FailureAnalysis analysis, CancellationToken ct) => Unavailable();
 }

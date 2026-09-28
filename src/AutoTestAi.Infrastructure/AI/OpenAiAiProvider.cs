@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using AutoTestAi.Application.AI;
+using AutoTestAi.Application.FailureAnalysis;
 using AutoTestAi.Application.TestGeneration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -26,17 +27,20 @@ public sealed class OpenAiAiProvider : IAiProvider
     private readonly IHttpClientFactory _httpClients;
     private readonly IOptions<AiOptions> _options;
     private readonly IAiTestGenerationPromptBuilder _prompts;
+    private readonly IAiFailureAnalysisPromptBuilder _analysisPrompts;
     private readonly ILogger<OpenAiAiProvider> _logger;
 
     public OpenAiAiProvider(
         IHttpClientFactory httpClients,
         IOptions<AiOptions> options,
         IAiTestGenerationPromptBuilder prompts,
+        IAiFailureAnalysisPromptBuilder analysisPrompts,
         ILogger<OpenAiAiProvider> logger)
     {
         _httpClients = httpClients;
         _options = options;
         _prompts = prompts;
+        _analysisPrompts = analysisPrompts;
         _logger = logger;
     }
 
@@ -46,107 +50,11 @@ public sealed class OpenAiAiProvider : IAiProvider
         AiGenerationRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var settings = _options.Value;
-        if (string.IsNullOrWhiteSpace(settings.ApiKey))
-            throw AiProviderException.NotConfigured(ProviderName,
-                "AI provider 'openai' is selected but AI:ApiKey is not configured. " +
-                "Set the server-side API key; it is never exposed to clients.");
-        var model = (settings.Model ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(model))
-            throw AiProviderException.NotConfigured(ProviderName,
-                "AI provider 'openai' is selected but AI:Model is not configured.");
-
-        // An explicit non-default BaseUrl allows OpenAI-compatible gateways;
-        // otherwise the public endpoint is used.
-        var baseUrl = (settings.BaseUrl ?? string.Empty).Trim().TrimEnd('/');
-        if (string.IsNullOrWhiteSpace(baseUrl) ||
-            string.Equals(baseUrl, "http://localhost:11434", StringComparison.OrdinalIgnoreCase))
-            baseUrl = DefaultEndpoint;
-        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out _))
-            throw AiProviderException.NotConfigured(ProviderName,
-                "AI provider 'openai' has an invalid AI:BaseUrl. Set an absolute URL.");
+        var (model, baseUrl, settings, apiKey) = RequireConfigured();
 
         var prompt = _prompts.Build(request);
-        var body = JsonSerializer.Serialize(new
-        {
-            model,
-            messages = new[]
-            {
-                new { role = "system", content = prompt.SystemPrompt },
-                new { role = "user", content = prompt.UserPrompt },
-            },
-            response_format = new { type = "json_object" },
-            temperature = settings.Temperature ?? 0.2,
-            max_tokens = settings.MaxOutputTokens ?? 4096,
-        }, JsonOptions);
-
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(settings.Timeout);
-
-        string responseBody;
-        try
-        {
-            var client = _httpClients.CreateClient(HttpClientName);
-            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/chat/completions")
-            {
-                Content = new StringContent(body, Encoding.UTF8, "application/json"),
-            };
-            // Authorization header is set per-request and never logged.
-            httpRequest.Headers.Authorization =
-                new AuthenticationHeaderValue("Bearer", settings.ApiKey.Trim());
-            using var response = await client.SendAsync(httpRequest, HttpCompletionOption.ResponseContentRead, timeout.Token);
-            responseBody = await response.Content.ReadAsStringAsync(timeout.Token);
-            if (response.StatusCode == HttpStatusCode.TooManyRequests)
-                throw AiProviderException.RateLimited(ProviderName,
-                    "OpenAI provider rate limit reached. Retry shortly.");
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw AiProviderException.Unavailable(ProviderName,
-                    "OpenAI provider rejected the server-side API key. Check server configuration. No test was saved.");
-            if (!response.IsSuccessStatusCode)
-                throw AiProviderException.Unavailable(ProviderName,
-                    $"OpenAI provider returned HTTP {(int)response.StatusCode}. No test was saved.");
-        }
-        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw AiProviderException.Timeout(ProviderName,
-                $"OpenAI provider timed out after {(int)settings.Timeout.TotalSeconds}s. No test was saved.", ex);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw AiProviderException.Unavailable(ProviderName,
-                "OpenAI provider is unreachable. Check network and endpoint configuration.", ex);
-        }
-        catch (AiProviderException)
-        {
-            throw;
-        }
-
-        string? content;
-        long? inputTokens = null, outputTokens = null, totalTokens = null;
-        try
-        {
-            using var outer = JsonDocument.Parse(responseBody);
-            var root = outer.RootElement;
-            content = root.TryGetProperty("choices", out var choices) &&
-                      choices.ValueKind == JsonValueKind.Array &&
-                      choices.GetArrayLength() > 0 &&
-                      choices[0].TryGetProperty("message", out var message) &&
-                      message.TryGetProperty("content", out var contentEl) &&
-                      contentEl.ValueKind == JsonValueKind.String
-                ? contentEl.GetString()
-                : null;
-            if (root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
-            {
-                if (usage.TryGetProperty("prompt_tokens", out var p) && p.TryGetInt64(out var pv)) inputTokens = pv;
-                if (usage.TryGetProperty("completion_tokens", out var c) && c.TryGetInt64(out var cv)) outputTokens = cv;
-                if (usage.TryGetProperty("total_tokens", out var t) && t.TryGetInt64(out var tv)) totalTokens = tv;
-            }
-        }
-        catch (JsonException ex)
-        {
-            throw AiProviderException.Malformed(ProviderName,
-                "OpenAI provider returned a malformed response envelope. No test was saved.", ex);
-        }
+        var (content, inputTokens, outputTokens, totalTokens) = await PostChatAsync(
+            baseUrl, model, prompt.SystemPrompt, prompt.UserPrompt, apiKey, settings, cancellationToken);
 
         var parsed = AiProviderResponseParser.Parse(ProviderName, content, request);
         // Log metadata only — never prompt bodies, responses, or the API key.
@@ -173,8 +81,133 @@ public sealed class OpenAiAiProvider : IAiProvider
             TotalTokens: totalTokens ?? inputTokens + outputTokens);
     }
 
-    public Task<AiAnalysisResult> AnalyzeFailureAsync(
+    public async Task<AiAnalysisResult> AnalyzeFailureAsync(
         AiFailureAnalysisRequest request, CancellationToken cancellationToken)
-        => throw new NotSupportedException(
-            "Failure analysis is not implemented in this slice (planned for Phase 1 Slice 6).");
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var (model, baseUrl, settings, apiKey) = RequireConfigured();
+        var prompt = _analysisPrompts.Build(request);
+
+        var (content, inputTokens, outputTokens, totalTokens) = await PostChatAsync(
+            baseUrl, model, prompt.SystemPrompt, prompt.UserPrompt, apiKey, settings, cancellationToken);
+
+        // Log metadata only — never prompt bodies, responses, or the API key.
+        _logger.LogInformation("AI failure analysis via {Provider} model {Model} completed.",
+            ProviderName, model);
+
+        return AiAnalysisResponseParser.Parse(
+            ProviderName, model, content, prompt.PromptVersion,
+            inputTokens, outputTokens, totalTokens ?? inputTokens + outputTokens);
+    }
+
+    private (string Model, string BaseUrl, AiOptions Settings, string ApiKey) RequireConfigured()
+    {
+        var settings = _options.Value;
+        if (string.IsNullOrWhiteSpace(settings.ApiKey))
+            throw AiProviderException.NotConfigured(ProviderName,
+                "AI provider 'openai' is selected but AI:ApiKey is not configured. " +
+                "Set the server-side API key; it is never exposed to clients.");
+        var model = (settings.Model ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(model))
+            throw AiProviderException.NotConfigured(ProviderName,
+                "AI provider 'openai' is selected but AI:Model is not configured.");
+
+        // An explicit non-default BaseUrl allows OpenAI-compatible gateways;
+        // otherwise the public endpoint is used.
+        var baseUrl = (settings.BaseUrl ?? string.Empty).Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(baseUrl) ||
+            string.Equals(baseUrl, "http://localhost:11434", StringComparison.OrdinalIgnoreCase))
+            baseUrl = DefaultEndpoint;
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out _))
+            throw AiProviderException.NotConfigured(ProviderName,
+                "AI provider 'openai' has an invalid AI:BaseUrl. Set an absolute URL.");
+        return (model, baseUrl, settings, settings.ApiKey.Trim());
+    }
+
+    /// <summary>Shared chat transport: prompt in, content + token usage out.</summary>
+    private async Task<(string? Content, long? InputTokens, long? OutputTokens, long? TotalTokens)> PostChatAsync(
+        string baseUrl, string model, string systemPrompt, string userPrompt,
+        string apiKey, AiOptions settings, CancellationToken cancellationToken)
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            model,
+            messages = new[]
+            {
+                new { role = "system", content = systemPrompt },
+                new { role = "user", content = userPrompt },
+            },
+            response_format = new { type = "json_object" },
+            temperature = settings.Temperature ?? 0.2,
+            max_tokens = settings.MaxOutputTokens ?? 4096,
+        }, JsonOptions);
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(settings.Timeout);
+
+        string responseBody;
+        try
+        {
+            var client = _httpClients.CreateClient(HttpClientName);
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/chat/completions")
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            };
+            // Authorization header is set per-request and never logged.
+            httpRequest.Headers.Authorization =
+                new AuthenticationHeaderValue("Bearer", apiKey);
+            using var response = await client.SendAsync(httpRequest, HttpCompletionOption.ResponseContentRead, timeout.Token);
+            responseBody = await response.Content.ReadAsStringAsync(timeout.Token);
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                throw AiProviderException.RateLimited(ProviderName,
+                    "OpenAI provider rate limit reached. Retry shortly.");
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                throw AiProviderException.Unavailable(ProviderName,
+                    "OpenAI provider rejected the server-side API key. Check server configuration.");
+            if (!response.IsSuccessStatusCode)
+                throw AiProviderException.Unavailable(ProviderName,
+                    $"OpenAI provider returned HTTP {(int)response.StatusCode}.");
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw AiProviderException.Timeout(ProviderName,
+                $"OpenAI provider timed out after {(int)settings.Timeout.TotalSeconds}s.", ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw AiProviderException.Unavailable(ProviderName,
+                "OpenAI provider is unreachable. Check network and endpoint configuration.", ex);
+        }
+        catch (AiProviderException)
+        {
+            throw;
+        }
+
+        try
+        {
+            using var outer = JsonDocument.Parse(responseBody);
+            var root = outer.RootElement;
+            string? content = root.TryGetProperty("choices", out var choices) &&
+                      choices.ValueKind == JsonValueKind.Array &&
+                      choices.GetArrayLength() > 0 &&
+                      choices[0].TryGetProperty("message", out var message) &&
+                      message.TryGetProperty("content", out var contentEl) &&
+                      contentEl.ValueKind == JsonValueKind.String
+                ? contentEl.GetString()
+                : null;
+            long? inputTokens = null, outputTokens = null, totalTokens = null;
+            if (root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
+            {
+                if (usage.TryGetProperty("prompt_tokens", out var p) && p.TryGetInt64(out var pv)) inputTokens = pv;
+                if (usage.TryGetProperty("completion_tokens", out var c) && c.TryGetInt64(out var cv)) outputTokens = cv;
+                if (usage.TryGetProperty("total_tokens", out var t) && t.TryGetInt64(out var tv)) totalTokens = tv;
+            }
+            return (content, inputTokens, outputTokens, totalTokens);
+        }
+        catch (JsonException ex)
+        {
+            throw AiProviderException.Malformed(ProviderName,
+                "OpenAI provider returned a malformed response envelope.", ex);
+        }
+    }
 }

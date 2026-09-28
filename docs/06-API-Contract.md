@@ -276,14 +276,41 @@ Live events on `/hubs/execution` (authorized subscription per execution):
 `ExecutionFailed`. Payloads carry no secrets. REST remains authoritative;
 SignalR is the live-update mechanism.
 
-## 9. Bugs
+## 9. Bugs (Defects)
+
+Implemented in Phase 1 Slice 6. Defects are internal human-owned records;
+external ticketing (Jira/Azure DevOps) is a later slice. AI can never create
+defects — creation is an explicit authenticated user action.
 
 ```http
-GET  /api/v1/projects/{projectId}/bugs
-GET  /api/v1/bugs/{bugId}
-POST /api/v1/projects/{projectId}/bugs
-PUT  /api/v1/bugs/{bugId}
+GET  /api/v1/projects/{projectId}/defects?page=&pageSize=&status=&severity=&classification=&testCaseId=&search=
+POST /api/v1/projects/{projectId}/defects
+GET  /api/v1/projects/{projectId}/defects/{defectId}
+PUT  /api/v1/projects/{projectId}/defects/{defectId}
+POST /api/v1/projects/{projectId}/defects/{defectId}/status
 ```
+
+Create request (relationships derive server-side from the execution):
+
+```json
+{
+  "executionId": "uuid (must be a failed execution in this project)",
+  "title": "Login returns 500",
+  "description": "Staging login fails after deploy.",
+  "severity": "High",
+  "failureAnalysisId": "uuid (optional, must belong to the same execution)"
+}
+```
+
+Rules: `bugs.manage` gates create/update/status; `bugs.read` gates reads;
+membership enforced (admin bypass); unknown/inaccessible defects → `403`
+(genuine 404 post-boundary). Executions must be Failed/Error/TimedOut
+(`409` otherwise); unknown execution ids → `403`. Status lifecycle:
+Open → InProgress/Resolved/Closed/Rejected, InProgress → Open/Resolved/Closed,
+Resolved → Closed/Open, Closed/Rejected → Open; invalid transitions → `400`
+with field details. Every create/update/status/severity change emits an
+audit event (`defect.created[_from_analysis]/updated/status_changed/
+severity_changed/reopened`).
 
 ## 10. Tickets
 
@@ -315,10 +342,59 @@ POST   /api/v1/integrations/{integrationId}/test
 
 Hub: `/hubs/execution`
 
-Events: `ExecutionStarted`, `ExecutionStatusChanged`, `ExecutionTestStarted`, `ExecutionLogReceived`, `ExecutionTestCompleted`, `FailureAnalysisCompleted`, `ExecutionCompleted`, `ExecutionFailed`.
+Events: `ExecutionStarted`, `ExecutionStatusChanged`, `ExecutionTestStarted`, `ExecutionStepStarted`, `ExecutionStepCompleted`, `ExecutionLogReceived`, `ExecutionTestCompleted`, `FailureAnalysisCompleted`, `ExecutionCompleted`, `ExecutionFailed`.
 
 The server authorizes access before a client subscribes to project/execution channels.
 The hub requires authentication; `SubscribeToExecution` verifies the execution
 exists, resolves its project, and enforces `executions.read` plus project
 membership. Rejections surface as hub errors (`Execution not found.` /
 `Forbidden: no access to this execution.`).
+
+## 13. Failure Analysis
+
+Implemented in Phase 1 Slice 6. Advisory AI explanations of failed
+executions over bounded redacted evidence. Analysis never mutates execution
+history, never modifies tests, and never creates defects.
+
+```http
+POST /api/v1/projects/{projectId}/executions/{executionId}/failure-analysis
+GET  /api/v1/projects/{projectId}/executions/{executionId}/failure-analysis
+GET  /api/v1/projects/{projectId}/executions/{executionId}/failure-analysis/attempts
+```
+
+Example response (`→ 200`):
+
+```json
+{
+  "id": "uuid",
+  "executionId": "uuid",
+  "attempt": 1,
+  "status": "Completed",
+  "classification": "TestFailure",
+  "summary": "The heading assertion failed.",
+  "probableCause": "Expected text differs from the rendered page.",
+  "confidence": 0.75,
+  "evidence": ["step 2 assertText failed"],
+  "assumptions": ["Login page under test."],
+  "warnings": ["Only one log line was available."],
+  "recommendedAction": "Inspect the heading selector.",
+  "isLikelyDefect": false,
+  "provider": "stub",
+  "model": "stub-1.0",
+  "promptVersion": "failure-analysis-v1",
+  "latencyMs": 12
+}
+```
+
+Rules: triggering requires `executions.analyze`; reading requires
+`executions.read`; membership enforced (admin bypass). Only Failed/Error/
+TimedOut executions may be analyzed (`409` otherwise); concurrent Running
+attempts are rejected with `409` (unique filtered index); retries create new
+attempts without rerunning the test. Evidence is bounded by
+`AI:FailureAnalysis` options (log lines/chars, error size, failed steps,
+artifact refs) with explicit truncation markers, and redacted before any
+provider sees it. Provider failures map like Slice 4 (`429`/`502`/`503`);
+malformed output is rejected (attempt marked Failed); cancellation marks the
+attempt Cancelled without touching the execution. Audit events
+`failure-analysis.requested/completed/failed/cancelled` carry safe metadata
+only; `FailureAnalysisCompleted` is published on success.

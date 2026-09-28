@@ -18,7 +18,8 @@ import { ProjectMembersPage } from '../features/projects/ProjectMembersPage';
 import { ProjectEnvironmentsPage } from '../features/projects/ProjectEnvironmentsPage';
 import { ExecutionListPage } from '../features/test-execution/ExecutionListPage';
 import { ExecutionDetailsPage } from '../features/test-execution/ExecutionDetailsPage';
-import { BugsPage } from '../features/bugs/BugsPage';
+import { DefectsListPage } from '../features/bugs/DefectsListPage';
+import { DefectDetailsPage } from '../features/bugs/DefectDetailsPage';
 import { TicketsPage } from '../features/tickets/TicketsPage';
 import { ReportsPage } from '../features/reports/ReportsPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
@@ -58,7 +59,10 @@ export const router = createBrowserRouter([
           { path: 'projects/:projectId/executions/:executionId', element: <ExecutionDetailsPage /> },
           // Legacy console shell replaced by project-scoped execution history in Slice 5.
           { path: 'test-execution', element: <Navigate to="/projects" replace /> },
-          { path: 'bugs', element: <BugsPage /> },
+          // Bugs are project-scoped: /bugs redirects to project selection.
+          { path: 'bugs', element: <Navigate to="/projects" replace /> },
+          { path: 'projects/:projectId/bugs', element: <DefectsListPage /> },
+          { path: 'projects/:projectId/bugs/:defectId', element: <DefectDetailsPage /> },
           { path: 'tickets', element: <TicketsPage /> },
           { path: 'reports', element: <ReportsPage /> },
           { path: 'settings', element: <SettingsPage /> },

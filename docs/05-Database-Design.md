@@ -72,11 +72,11 @@ users/projects → audit_events
 ### execution_artifacts
 `id UUID PK`, `execution_test_id FK`, `artifact_type`, `storage_key`, `file_name`, `step_order NULL`, `content_type`, `size_bytes`, `created_at`. Bytes live in MinIO/S3 under deterministic keys (`projects/{project}/executions/{execution}/tests/{test}/step-{order}-{file}`); downloads use short-lived server-minted presigned URLs.
 
-### failure_analyses
-`id UUID PK`, `execution_test_id FK`, `classification`, `root_cause`, `evidence JSONB`, `confidence NUMERIC(5,4)`, `provider`, `model`, `created_at`.
+### failure_analyses (Slice 6)
+`id UUID PK`, `execution_test_id FK`, `attempt` (1-based; retries append rows), `status` (Running/Completed/Failed/Cancelled), `classification`, `summary` (≤500), `root_cause` (probable cause, ≤2000), `evidence JSONB` (bounded redacted snapshot), `assumptions`/`warnings` (`text[]`), `recommended_action` (≤500), `is_likely_defect`, `confidence`, `provider`, `model`, `prompt_version`, `latency_ms`, input/output/total tokens, `error_message`, `created_at`. Unique `(execution_test_id,attempt)`; unique filtered `execution_test_id WHERE status='Running'` (one active analysis). Analysis rows are advisory and immutable once terminal.
 
 ### defects
-`id UUID PK`, `project_id FK`, `execution_test_id`, `title`, `description`, `severity`, `status`, `root_cause_type`, `ai_confidence`, timestamps.
+`id UUID PK`, `project_id FK`, `execution_test_id` (failed execution this defect was filed against), `failure_analysis_id NULL` (advisory analysis linked at creation, if any), `title`, `description`, `severity`, `status`, `root_cause_type`, `ai_confidence` (copied from the linked analysis, if any), `created_by`, timestamps.
 
 ### tickets
 `id UUID PK`, `project_id FK`, `defect_id`, `provider`, `external_ticket_id`, `external_url`, `title`, `status`, `sync_status`, timestamps; unique `(project_id,provider,external_ticket_id)`.

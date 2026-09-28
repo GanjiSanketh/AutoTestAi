@@ -102,6 +102,18 @@ public enum FailureClassification
     TestFailure = 4
 }
 
+/// <summary>
+/// AI failure-analysis attempt lifecycle (Slice 6). Absence of rows means
+/// NotAnalyzed. Attempts are immutable; retries create new attempt rows.
+/// </summary>
+public enum AnalysisStatus
+{
+    Running = 0,
+    Completed = 1,
+    Failed = 2,
+    Cancelled = 3
+}
+
 public enum IntegrationStatus
 {
     Active = 0,

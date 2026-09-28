@@ -1,10 +1,13 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using AutoTestAi.Application.Defects;
+using AutoTestAi.Application.Defects;
 using AutoTestAi.Application.Identity;
 using AutoTestAi.Application.Projects;
 using AutoTestAi.Application.TestCases;
 using AutoTestAi.Application.TestExecution;
+using AutoTestAi.Infrastructure.Defects;
 using AutoTestAi.Infrastructure.Executions;
 using AutoTestAi.Infrastructure.Identity;
 using AutoTestAi.Infrastructure.Persistence;
@@ -156,6 +159,8 @@ public sealed class Slice1ApiFactory : WebApplicationFactory<Program>
             services.AddScoped<ITestCaseStore, EfTestCaseStore>();
             services.RemoveAll<IExecutionStore>();
             services.AddScoped<IExecutionStore, EfExecutionStore>();
+            services.RemoveAll<IDefectStore>();
+            services.AddScoped<IDefectStore, EfDefectStore>();
             services.AddSingleton<IExecutionWorkflowCoordinator>(WorkflowCoordinator);
             services.RemoveAll<ITestExecutionWorkflowStarter>();
             services.AddSingleton<ITestExecutionWorkflowStarter>(new FakeWorkflowStarter());

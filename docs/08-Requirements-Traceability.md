@@ -21,8 +21,8 @@
 | AI test generation | AI gateway (`IAiTestGenerator` → `IAiProviderResolver` → `IAiProvider`) + Ollama/OpenAI HTTP adapters (Slice 4: project-scoped `POST …/test-generation`, prompt `test-generation-v1`, structured-output validation, secret redaction, `sourceType=ai` + `Pending` versions via `TestCaseService`, safe provider-status endpoint, audit events; Gemini planned/unsupported; generated code never executed) |
 | Test execution | Execution control plane + Temporal `TestExecutionWorkflow` + Playwright step-interpreter worker (Slice 5: exact-version binding, approval gate, Queued→Running→Passed/Failed/Cancelled/TimedOut/Error, single infra retry, idempotent cancel/timeout finalization, step results/logs/screenshot artifacts via MinIO + presigned downloads, SignalR live events, execution history/detail UI; source code never executed) |
 | Live execution | SignalR |
-| Failure analysis | failure_analyses + AI analysis |
-| Defect management | defects |
+| Failure analysis | `failure_analyses` attempts + `IAiProvider.AnalyzeFailureAsync` (Slice 6: bounded redacted evidence, prompt `failure-analysis-v1`, validated advisory output, attempt history, no execution mutation) |
+| Defect management | `defects` (Slice 6: explicit human creation from failed executions, server-derived relationships, validated status lifecycle, audited changes, list/detail UI; no external tickets yet) |
 | Jira | tickets + integrations |
 | Quality dashboard | dashboard API + ECharts |
 | Audit | audit_events |

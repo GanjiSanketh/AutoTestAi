@@ -12,11 +12,12 @@ public enum AiProviderType
     Gemini
 }
 
-/// <summary>Prompt versions for traceability (Slice 4 §12). Never change prompt
-/// behavior without bumping the version; the version is stored in generation metadata.</summary>
+/// <summary>Prompt versions for traceability (Slices 4/6). Never change prompt
+/// behavior without bumping the version; the version is stored in metadata.</summary>
 public static class AiPromptVersions
 {
     public const string TestGenerationV1 = "test-generation-v1";
+    public const string FailureAnalysisV1 = "failure-analysis-v1";
 }
 
 /// <summary>
@@ -94,11 +95,59 @@ public sealed record AiFailureAnalysisRequest(
     Guid ExecutionTestId,
     string? ErrorType,
     string? ErrorMessage,
-    string? TestTitle);
+    string? TestTitle,
+    AiFailureAnalysisContext? Context = null);
+
+/// <summary>
+/// Bounded redacted failure evidence handed to a provider (Slice 6 §5).
+/// No raw credentials, no full histories, no artifact bytes — metadata only.
+/// </summary>
+public sealed record AiFailureEvidenceStep(
+    int Order,
+    string Action,
+    string? Target,
+    string Status,
+    string? ErrorMessage);
+
+public sealed record AiFailureEvidenceLog(
+    string Level,
+    string Message);
+
+/// <summary>
+/// Structured execution evidence for failure analysis. Produced by the
+/// evidence service (bounded + redacted); the provider must analyze ONLY this.
+/// </summary>
+public sealed record AiFailureAnalysisContext(
+    Guid ExecutionId,
+    Guid ExecutionTestId,
+    string TestKey,
+    string TestTitle,
+    string Framework,
+    string Platform,
+    string Browser,
+    string ExecutionClassification,
+    string? FailedStepSummary,
+    IReadOnlyList<AiFailureEvidenceStep> FailedSteps,
+    IReadOnlyList<AiFailureEvidenceLog> Logs,
+    int ArtifactCount,
+    IReadOnlyList<string> ArtifactNames,
+    int Attempt,
+    bool Truncated);
 
 public sealed record AiAnalysisResult(
     string Provider,
     string? Model,
     string Classification,
     string RootCause,
-    decimal Confidence);
+    decimal Confidence,
+    string? Summary = null,
+    IReadOnlyList<string>? Evidence = null,
+    IReadOnlyList<string>? Assumptions = null,
+    IReadOnlyList<string>? Warnings = null,
+    string? RecommendedAction = null,
+    bool IsLikelyDefect = false,
+    string? PromptVersion = null,
+    long? InputTokens = null,
+    long? OutputTokens = null,
+    long? TotalTokens = null,
+    long LatencyMs = 0);

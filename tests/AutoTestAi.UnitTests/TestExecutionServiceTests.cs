@@ -29,6 +29,7 @@ public sealed class TestExecutionServiceTests
         public readonly List<ExecutionStepResult> Steps = new();
         public readonly List<ExecutionLog> Logs = new();
         public readonly List<ExecutionArtifact> Artifacts = new();
+        public readonly List<FailureAnalysis> Analyses = new();
         private long _logId;
 
         private readonly FakeTestCaseStore _cases;
@@ -94,6 +95,11 @@ public sealed class TestExecutionServiceTests
         public Task AddArtifactAsync(ExecutionArtifact a, CancellationToken ct) { Artifacts.Add(a); return Task.CompletedTask; }
         public Task DeleteArtifactsAsync(Guid id, CancellationToken ct)
         { Artifacts.RemoveAll(a => a.ExecutionTestId == id); return Task.CompletedTask; }
+        public Task<IReadOnlyList<FailureAnalysis>> ListAnalysesAsync(Guid id, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<FailureAnalysis>>(Analyses.Where(a => a.ExecutionTestId == id).ToList());
+        public Task<FailureAnalysis?> GetAnalysisByIdAsync(Guid id, CancellationToken ct)
+            => Task.FromResult(Analyses.FirstOrDefault(a => a.Id == id));
+        public Task AddAnalysisAsync(FailureAnalysis a, CancellationToken ct) { Analyses.Add(a); return Task.CompletedTask; }
     }
 
     private sealed class FakeProjectStore : IProjectStore

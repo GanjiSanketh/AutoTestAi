@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Ban, ImageIcon, ListChecks, Loader2, ExternalLink } from 'lucide-react';
 import { Button } from '../../components/ui/button';
@@ -22,6 +22,7 @@ import {
 import { useProfile } from '../../lib/auth/useProfile';
 import { Permissions, hasPermission } from '../../lib/auth/permissions';
 import { executionTone } from './ExecutionListPage';
+import { FailureAnalysisSection } from './FailureAnalysisSection';
 
 const TERMINAL = new Set(['Passed', 'Failed', 'Cancelled', 'TimedOut', 'Error']);
 const MAX_LOG_LINES = 500;
@@ -66,9 +67,12 @@ interface LiveStep extends ExecutionStep {
  */
 export function ExecutionDetailsPage() {
   const { projectId = '', executionId = '' } = useParams();
+  const navigate = useNavigate();
   const profile = useProfile();
   const queryClient = useQueryClient();
   const canCancel = hasPermission(profile.data?.permissions, Permissions.ExecutionsCancel);
+  const canAnalyze = hasPermission(profile.data?.permissions, Permissions.ExecutionsAnalyze);
+  const canCreateDefect = hasPermission(profile.data?.permissions, Permissions.BugsManage);
 
   const [liveSteps, setLiveSteps] = useState<Map<number, LiveStep> | null>(null);
   const [liveLogs, setLiveLogs] = useState<ExecutionLogEntry[] | null>(null);
@@ -253,6 +257,14 @@ export function ExecutionDetailsPage() {
   const execution = detail.data;
   const test = execution.test;
   const cancelError = cancel.error instanceof ApiError ? cancel.error : null;
+  const analyzable = ['Failed', 'Error', 'TimedOut'].includes(execution.status);
+  const failedSteps = test.steps.filter((s) => s.status === 'Failed' || s.status === 'Error');
+  const failedStepSummary =
+    failedSteps.length === 0
+      ? null
+      : failedSteps
+          .map((s) => `step ${s.order} (${s.action})${s.errorMessage ? `: ${s.errorMessage}` : ''}`)
+          .join('; ');
 
   return (
     <div className="space-y-6">
@@ -446,6 +458,20 @@ export function ExecutionDetailsPage() {
           </Card>
         </div>
       </div>
+
+      {analyzable && (
+        <FailureAnalysisSection
+          projectId={projectId}
+          executionId={executionId}
+          executionClassification={test.failureClassification ?? 'Unknown'}
+          failedStepSummary={failedStepSummary}
+          errorMessage={test.errorMessage}
+          testKey={test.testKey}
+          canAnalyze={canAnalyze}
+          canCreateDefect={canCreateDefect}
+          onDefectCreated={(defectId) => navigate(`/projects/${projectId}/bugs/${defectId}`)}
+        />
+      )}
 
       <Card className="overflow-hidden border-slate-900 bg-slate-950">
         <CardHeader className="flex flex-row items-center justify-between border-b border-slate-800">

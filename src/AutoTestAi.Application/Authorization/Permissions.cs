@@ -14,6 +14,7 @@ public static class Permissions
     public const string ExecutionsRead = "executions.read";
     public const string ExecutionsExecute = "executions.execute";
     public const string ExecutionsCancel = "executions.cancel";
+    public const string ExecutionsAnalyze = "executions.analyze";
     public const string BugsRead = "bugs.read";
     public const string BugsManage = "bugs.manage";
     public const string TicketsRead = "tickets.read";
@@ -25,7 +26,7 @@ public static class Permissions
     {
         DashboardRead, ProjectsRead, ProjectsManage,
         TestCasesRead, TestCasesManage,
-        ExecutionsRead, ExecutionsExecute, ExecutionsCancel,
+        ExecutionsRead, ExecutionsExecute, ExecutionsCancel, ExecutionsAnalyze,
         BugsRead, BugsManage,
         TicketsRead, TicketsCreate,
         ReportsRead, SettingsManage,

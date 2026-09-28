@@ -100,11 +100,33 @@ public sealed class FailureAnalysis
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ExecutionTestId { get; set; }
+
+    /// <summary>1-based attempt number; retries append new rows, never overwrite.</summary>
+    public int Attempt { get; set; } = 1;
+
+    public AnalysisStatus Status { get; set; } = AnalysisStatus.Running;
     public FailureClassification Classification { get; set; } = FailureClassification.Unknown;
+
+    /// <summary>Probable cause (advisory — never mutates execution history).</summary>
     public string? RootCause { get; set; }
+
+    public string? Summary { get; set; }
+
+    /// <summary>Bounded redacted evidence snapshot (never raw provider input).</summary>
     public JsonDocument? Evidence { get; set; }
+
+    public List<string> Assumptions { get; set; } = new();
+    public List<string> Warnings { get; set; } = new();
+    public string? RecommendedAction { get; set; }
+    public bool IsLikelyDefect { get; set; }
     public decimal? Confidence { get; set; }
     public string? Provider { get; set; }
     public string? Model { get; set; }
+    public string? PromptVersion { get; set; }
+    public long? LatencyMs { get; set; }
+    public long? InputTokens { get; set; }
+    public long? OutputTokens { get; set; }
+    public long? TotalTokens { get; set; }
+    public string? ErrorMessage { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

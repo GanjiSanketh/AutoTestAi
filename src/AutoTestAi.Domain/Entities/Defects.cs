@@ -8,12 +8,19 @@ public sealed class Defect : EntityBase
 {
     public Guid ProjectId { get; set; }
     public Guid? ExecutionTestId { get; set; }
+    /// <summary>
+    /// Advisory analysis this defect was created from (human decision, audited).
+    /// Null when created without AI analysis.
+    /// </summary>
+    public Guid? FailureAnalysisId { get; set; }
+
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
     public Severity Severity { get; set; } = Severity.Medium;
     public DefectStatus Status { get; set; } = DefectStatus.Open;
     public FailureClassification? RootCauseType { get; set; }
     public decimal? AiConfidence { get; set; }
+    public Guid? CreatedBy { get; set; }
 }
 
 public sealed class Ticket : EntityBase

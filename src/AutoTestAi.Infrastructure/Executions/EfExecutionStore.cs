@@ -3,6 +3,7 @@ using AutoTestAi.Application.TestExecution;
 using AutoTestAi.Domain.Entities;
 using AutoTestAi.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace AutoTestAi.Infrastructure.Executions;
 
@@ -157,6 +158,33 @@ public sealed class EfExecutionStore : IExecutionStore
             .ToListAsync(ct);
         _db.ExecutionArtifacts.RemoveRange(rows);
     }
+
+    public async Task<IReadOnlyList<FailureAnalysis>> ListAnalysesAsync(Guid executionTestId, CancellationToken ct)
+        => await _db.FailureAnalyses
+            .Where(a => a.ExecutionTestId == executionTestId)
+            .OrderBy(a => a.Attempt)
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+    public Task<FailureAnalysis?> GetAnalysisByIdAsync(Guid analysisId, CancellationToken ct)
+        => _db.FailureAnalyses.FirstOrDefaultAsync(a => a.Id == analysisId, ct);
+
+    public async Task AddAnalysisAsync(FailureAnalysis analysis, CancellationToken ct)
+    {
+        await _db.FailureAnalyses.AddAsync(analysis, ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            throw new ConflictException(
+                "A failure analysis is already running for this execution test.");
+        }
+    }
+
+    private static bool IsUniqueViolation(DbUpdateException ex)
+        => ex.InnerException is PostgresException pg && pg.SqlState == "23505";
 
     private IQueryable<Execution> ApplyFilters(Guid projectId, string? status, Guid? testCaseId)
     {

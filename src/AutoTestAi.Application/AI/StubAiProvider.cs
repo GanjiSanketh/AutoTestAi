@@ -85,11 +85,42 @@ public sealed class StubAiProvider : IAiProvider
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Deterministic stub: mirrors the execution classification when bounded
+        // evidence is supplied, otherwise the legacy Unknown placeholder.
+        // Never fabricates confidence: 0 unless evidence is present.
+        var context = request.Context;
+        if (context is null)
+            return Task.FromResult(new AiAnalysisResult(
+                Provider: Name,
+                Model: "stub-1.0",
+                Classification: "Unknown",
+                RootCause: "Phase-0 stub: no real analysis performed.",
+                Confidence: 0m));
+
+        var classification = context.ExecutionClassification switch
+        {
+            "ApplicationDefect" => "ApplicationDefect",
+            "EnvironmentFailure" => "EnvironmentFailure",
+            "AutomationFailure" => "AutomationFailure",
+            "TestFailure" => "TestFailure",
+            _ => "Unknown",
+        };
+        var summary = string.IsNullOrWhiteSpace(context.FailedStepSummary)
+            ? $"Stub analysis of {context.TestKey} failure."
+            : $"Stub analysis: {context.FailedStepSummary}.";
         return Task.FromResult(new AiAnalysisResult(
             Provider: Name,
             Model: "stub-1.0",
-            Classification: "Unknown",
-            RootCause: "Phase-0 stub: no real analysis performed.",
-            Confidence: 0m));
+            Classification: classification,
+            RootCause: $"Stub heuristic: deterministic classification is {context.ExecutionClassification}.",
+            Confidence: 0.5m,
+            Summary: summary,
+            Assumptions: ["Stub output assumes the supplied evidence is complete."],
+            Warnings: ["Configure ollama or openai for real analysis."],
+            RecommendedAction: "Review the failed step and logs, then decide whether to file a defect.",
+            IsLikelyDefect: string.Equals(classification, "ApplicationDefect", StringComparison.Ordinal),
+            PromptVersion: AiPromptVersions.FailureAnalysisV1));
     }
 }
