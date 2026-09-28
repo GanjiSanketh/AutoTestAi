@@ -3,7 +3,6 @@ using AutoTestAi.Api.Health;
 using AutoTestAi.Api.Hubs;
 using AutoTestAi.Application.Authorization;
 using AutoTestAi.Infrastructure.Cache;
-using AutoTestAi.Infrastructure.Data;
 using AutoTestAi.Infrastructure.Storage;
 using AutoTestAi.Workflows.Abstractions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;

@@ -93,6 +93,7 @@ public sealed class TestCaseService : ITestCaseService
         else if (key.Length > TestCaseKey.MaxLength) errors.Add(new FieldError("testKey", $"Test key must be at most {TestCaseKey.MaxLength} characters."));
         else if (!TestCaseKey.IsValidFormat(key)) errors.Add(new FieldError("testKey", "Test key must start with a letter and contain only letters, digits, '_' or '-'."));
         ValidateContent(command.SourceCode, command.StructuredSteps, errors);
+        ValidateGenerationMetadata(command, errors);
         ValidationException.ThrowIfInvalid(errors);
 
         if (await _store.GetByKeyAsync(command.ProjectId, key, cancellationToken) is not null)
@@ -120,6 +121,11 @@ public sealed class TestCaseService : ITestCaseService
         var version = BuildVersion(
             testCase.Id, 1, command.SourceCode, command.StructuredSteps, null, testCase.CreatedBy);
         version.CreatedAt = now;
+        // AI provenance (Slice 4 §16): provider/model/latency + redacted request.
+        version.GenerationProvider = BlankToNull(command.GenerationProvider);
+        version.GenerationModel = BlankToNull(command.GenerationModel);
+        version.GenerationLatencyMs = command.GenerationLatencyMs;
+        version.GenerationRequest = command.GenerationRequest;
         await _store.AddVersionAsync(version, cancellationToken);
         await _store.SaveChangesAsync(cancellationToken);
 
@@ -346,6 +352,20 @@ public sealed class TestCaseService : ITestCaseService
     {
         if (sourceCode is not null && sourceCode.Length > MaxSourceLength)
             errors.Add(new FieldError("sourceCode", $"Source code must be at most {MaxSourceLength} characters."));
+    }
+
+    /// <summary>AI provenance metadata (Slice 4 §16): shaped, bounded, never secrets.</summary>
+    private static void ValidateGenerationMetadata(CreateTestCaseCommand command, List<FieldError> errors)
+    {
+        if (command.GenerationProvider is not null && command.GenerationProvider.Trim().Length > 100)
+            errors.Add(new FieldError("generationProvider", "Generation provider must be at most 100 characters."));
+        if (command.GenerationModel is not null && command.GenerationModel.Trim().Length > 200)
+            errors.Add(new FieldError("generationModel", "Generation model must be at most 200 characters."));
+        if (command.GenerationLatencyMs is not null && command.GenerationLatencyMs < 0)
+            errors.Add(new FieldError("generationLatencyMs", "Generation latency must not be negative."));
+        if (command.GenerationRequest is not null &&
+            command.GenerationRequest.RootElement.ValueKind != JsonValueKind.Object)
+            errors.Add(new FieldError("generationRequest", "Generation request must be a JSON object."));
     }
 
     private static JsonDocument? ValidateSteps(JsonElement? structuredSteps, List<FieldError> errors)

@@ -27,8 +27,8 @@ builder.Services.Configure<AuthenticationOptions>(
     builder.Configuration.GetSection(AuthenticationOptions.SectionName));
 builder.Services.Configure<CorsOptions>(
     builder.Configuration.GetSection(CorsOptions.SectionName));
-builder.Services.Configure<AiOptions>(
-    builder.Configuration.GetSection(AiOptions.SectionName));
+builder.Services.Configure<AutoTestAi.Application.AI.AiOptions>(
+    builder.Configuration.GetSection(AutoTestAi.Application.AI.AiOptions.SectionName));
 builder.Services.Configure<ObservabilityOptions>(
     builder.Configuration.GetSection(ObservabilityOptions.SectionName));
 
@@ -203,6 +203,7 @@ app.MapV1Endpoints();
 app.MapAuthEndpoints();
 app.MapProjectEndpoints();
 app.MapTestCaseEndpoints();
+app.MapTestGenerationEndpoints();
 app.MapHub<ExecutionHub>("/hubs/execution");
 
 if (!authOptions.Configured)

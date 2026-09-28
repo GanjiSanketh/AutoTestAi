@@ -19,12 +19,6 @@ public sealed class CorsOptions
     public string[] AllowedOrigins { get; set; } = ["http://localhost:5173"];
 }
 
-public sealed class AiOptions
-{
-    public const string SectionName = "Ai";
-    public string DefaultProvider { get; set; } = "stub";
-}
-
 public sealed class ObservabilityOptions
 {
     public const string SectionName = "Observability";

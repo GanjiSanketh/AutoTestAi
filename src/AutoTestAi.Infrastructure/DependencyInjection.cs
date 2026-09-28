@@ -1,8 +1,9 @@
+using AutoTestAi.Application.AI;
 using AutoTestAi.Application.Identity;
 using AutoTestAi.Application.Projects;
 using AutoTestAi.Application.TestCases;
+using AutoTestAi.Infrastructure.AI;
 using AutoTestAi.Infrastructure.Cache;
-using AutoTestAi.Infrastructure.Data;
 using AutoTestAi.Infrastructure.Identity;
 using AutoTestAi.Infrastructure.Persistence;
 using AutoTestAi.Infrastructure.Projects;
@@ -50,9 +51,18 @@ public static class DependencyInjection
             services.AddSingleton<ITestCaseStore, UnavailableTestCaseStore>();
         }
 
-        services.AddDapperSupport(configuration);
+        // Dapper remains referenced for future read-model queries (docs/04);
+        // no Dapper support services are registered until they are needed.
         services.AddSingleton<IValkeyCache, ValkeyCache>();
         services.AddSingleton<IArtifactStorage, MinioArtifactStorage>();
+
+        // AI provider adapters (ADR-003): HTTP-based, no vendor SDKs.
+        // Gemini is intentionally not registered — the resolver reports it as
+        // unsupported until a real adapter lands (Slice 4 §9).
+        services.AddHttpClient("ai-ollama");
+        services.AddHttpClient("ai-openai");
+        services.AddTransient<IAiProvider, OllamaAiProvider>();
+        services.AddTransient<IAiProvider, OpenAiAiProvider>();
 
         return services;
     }

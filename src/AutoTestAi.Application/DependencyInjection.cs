@@ -5,6 +5,7 @@ using AutoTestAi.Application.Common;
 using AutoTestAi.Application.Projects;
 using AutoTestAi.Application.TestCases;
 using AutoTestAi.Application.TestExecution;
+using AutoTestAi.Application.TestGeneration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AutoTestAi.Application;
@@ -15,13 +16,19 @@ public static class DependencyInjection
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
-        // Phase 0: a deterministic stub proves the IAiProvider seam works.
-        // Real adapters (Ollama/OpenAI/Gemini) plug in here in Phase 1.
+        // Deterministic stub proves the IAiProvider seam. Real adapters
+        // (Ollama/OpenAI) register in Infrastructure; the resolver picks the
+        // configured one. Nothing here references vendor SDKs (ADR-003).
         services.AddSingleton<IAiProvider, StubAiProvider>();
+        services.AddSingleton<IAiProviderResolver, AiProviderResolver>();
+        services.AddSingleton<IAiTestGenerationPromptBuilder, AiTestGenerationPromptBuilder>();
+        services.AddSingleton<AiGenerationValidator>();
+        services.AddSingleton<AiGenerationRateLimiter>();
         services.AddScoped<IAuthorizationService, AuthorizationService>();
         services.AddScoped<IExecutionSubscriptionAuthorizer, ExecutionSubscriptionAuthorizer>();
         services.AddScoped<IProjectService, ProjectService>();
         services.AddScoped<ITestCaseService, TestCaseService>();
+        services.AddScoped<IAiTestGenerator, TestGenerationService>();
         services.AddScoped<IAuditService, AuditService>();
         return services;
     }

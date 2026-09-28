@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AutoTestAi.Domain\AutoTestAi.Domain.csproj" />
     <ProjectReference Include="..\..\src\AutoTestAi.Application\AutoTestAi.Application.csproj" />
+    <ProjectReference Include="..\..\src\AutoTestAi.Infrastructure\AutoTestAi.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

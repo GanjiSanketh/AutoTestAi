@@ -107,6 +107,23 @@ public interface IAiProvider
 
 Adapters may include Ollama, OpenAI and Gemini. Local AI is a deployment option, not a platform dependency.
 
+Slice-4 implementation notes (no new ADR — ADR-003 already covers this):
+
+- `Application.TestGeneration.TestGenerationService` (behind `IAiTestGenerator`)
+  is the single orchestrator: authorize → resolve provider → generate →
+  validate → redact → persist through `ITestCaseService` → audit. Controllers
+  never touch providers.
+- `Application.AI.AiProviderResolver` maps `AI:Provider` configuration to an
+  adapter; unknown names and missing required configuration fail loudly, never
+  silently fall back. `AI:ApiKey` and endpoints stay server-side.
+- Prompt construction lives in `IAiTestGenerationPromptBuilder`
+  (version `test-generation-v1`, stored in generation metadata).
+- `OllamaAiProvider` / `OpenAiAiProvider` (Infrastructure, HTTP only, no vendor
+  SDKs) return normalized structured results with token usage when reported.
+  Gemini has no adapter yet and resolves as unsupported.
+- A small per-project generation budget plus provider timeouts, cancellation
+  propagation, and upstream-429 mapping bound cost without a quota system.
+
 ## 7. Workflow
 
 Temporal orchestrates long-running execution:

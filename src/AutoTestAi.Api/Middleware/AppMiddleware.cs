@@ -57,6 +57,7 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Ex
             AutoTestAi.Application.Common.ValidationException validation => (HttpStatusCode.BadRequest, "VALIDATION_ERROR", validation.Message, validation.Errors.Select(e => (object)new { field = e.Field, message = e.Message }).ToList()),
             AutoTestAi.Application.Common.ConflictException => (HttpStatusCode.Conflict, "CONFLICT", ex.Message, (IReadOnlyList<object>)Array.Empty<object>()),
             AutoTestAi.Application.Common.NotFoundException => (HttpStatusCode.NotFound, "NOT_FOUND", ex.Message, (IReadOnlyList<object>)Array.Empty<object>()),
+            AutoTestAi.Application.AI.AiProviderException ai => MapAiProviderError(ai),
             ArgumentException => (HttpStatusCode.BadRequest, "VALIDATION_ERROR", ex.Message, (IReadOnlyList<object>)Array.Empty<object>()),
             InvalidOperationException invalidOp => (HttpStatusCode.ServiceUnavailable, "DEPENDENCY_UNAVAILABLE", FriendlyDependencyMessage(invalidOp), (IReadOnlyList<object>)Array.Empty<object>()),
             _ => (HttpStatusCode.InternalServerError, "INTERNAL_ERROR", "An unexpected error occurred.", (IReadOnlyList<object>)Array.Empty<object>())
@@ -92,6 +93,31 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Ex
         };
 
         await context.Response.WriteAsJsonAsync(envelope);
+    }
+
+    /// <summary>
+    /// Maps provider failures to HTTP semantics (Slice 4 §20) without leaking
+    /// vendor details, stack traces, or secrets. Only unexpected failures
+    /// remain 500.
+    /// </summary>
+    private static (HttpStatusCode Status, string Code, string Message, IReadOnlyList<object> Details)
+        MapAiProviderError(AutoTestAi.Application.AI.AiProviderException ex)
+    {
+        var empty = (IReadOnlyList<object>)Array.Empty<object>();
+        return ex.Kind switch
+        {
+            AutoTestAi.Application.AI.AiProviderErrorKind.RateLimited =>
+                (HttpStatusCode.TooManyRequests, "RATE_LIMITED", ex.Message, empty),
+            AutoTestAi.Application.AI.AiProviderErrorKind.MalformedResponse =>
+                (HttpStatusCode.BadGateway, "PROVIDER_RESPONSE_ERROR", ex.Message, empty),
+            AutoTestAi.Application.AI.AiProviderErrorKind.Unavailable =>
+                (HttpStatusCode.ServiceUnavailable, "PROVIDER_UNAVAILABLE", ex.Message, empty),
+            AutoTestAi.Application.AI.AiProviderErrorKind.Timeout =>
+                (HttpStatusCode.ServiceUnavailable, "PROVIDER_TIMEOUT", ex.Message, empty),
+            AutoTestAi.Application.AI.AiProviderErrorKind.NotConfigured =>
+                (HttpStatusCode.ServiceUnavailable, "PROVIDER_NOT_CONFIGURED", ex.Message, empty),
+            _ => (HttpStatusCode.InternalServerError, "PROVIDER_NOT_SUPPORTED", ex.Message, empty),
+        };
     }
 
     /// <summary>

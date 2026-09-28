@@ -140,24 +140,76 @@ failures → `400` with field details. Test-case operations emit `audit_events`
 
 ## 7. AI Generation
 
+Implemented in Phase 1 Slice 4. Production-oriented generation behind the AI
+gateway (ADR-003): the application depends only on `IAiProvider`; Ollama and
+OpenAI adapters live in Infrastructure (HTTP, no vendor SDKs). Gemini is a
+planned provider and is reported as unsupported until a real adapter lands —
+support is never faked.
+
 ```http
 POST /api/v1/projects/{projectId}/test-generation
+GET  /api/v1/projects/{projectId}/ai-provider-status
 ```
 
-Example request:
+Example request (project-scoped intent only — never provider/model/keys/prompts):
 
 ```json
 {
   "title": "User login with valid credentials",
   "description": "Verify that a registered user can log in.",
   "targetUrl": "https://example.test",
-  "framework": "playwright-typescript",
+  "framework": "playwright",
   "platform": "web",
+  "module": "Authentication",
+  "priority": "High",
+  "additionalContext": "Use {{username}} / {{password}} placeholders.",
   "requirements": ["Validate successful login", "Validate dashboard navigation"]
 }
 ```
 
-AI output must be treated as generated content requiring validation/review, not trusted executable code.
+Example response (normalized; `→ 200`):
+
+```json
+{
+  "generationId": "uuid",
+  "testCaseId": "uuid",
+  "testKey": "AI-LOGIN-AB12CD",
+  "versionId": "uuid",
+  "versionNumber": 1,
+  "status": "Succeeded",
+  "title": "Successful user login",
+  "framework": "playwright",
+  "platform": "web",
+  "structuredSteps": [{"order": 1, "action": "navigate", "target": "https://example.test", "value": null}],
+  "sourceCode": "import { test } from '@playwright/test'; …",
+  "assumptions": ["Username field uses #username."],
+  "warnings": ["The selector was inferred and has not been verified."],
+  "provider": "ollama",
+  "model": "qwen3:8b",
+  "promptVersion": "test-generation-v1",
+  "latencyMs": 12345,
+  "reviewStatus": "Pending"
+}
+```
+
+Rules: `testcases.manage` + project membership gate generation (admin
+bypass); anonymous → `401`, unauthorized → `403` (`FORBIDDEN`). Successful
+generation creates a new test case (server-allocated `AI-*` key) with version 1
+via `TestCaseService`: `sourceType = "ai"`, `reviewStatus = "Pending"`
+(never auto-approved), existing `generation_provider` / `generation_model` /
+`generation_latency_ms` columns populated, and the redacted normalized request
+stored in `generation_request` (credentials masked as `[REDACTED]`). No new
+tables. Audit events `test-generation.requested/completed/failed` carry safe
+metadata only (provider, model, prompt version, latency, outcome).
+
+`GET …/ai-provider-status` returns safe metadata only
+(`provider/model/configured/detail/promptVersion`) for readers — never keys,
+endpoints, or prompts. Validation failures → `400`; upstream rate limits →
+`429` (plus a per-project generation budget); provider timeouts/unreachable →
+`503`; malformed provider output → `502`; missing provider configuration →
+`503` (`PROVIDER_NOT_CONFIGURED`); unknown/unimplemented provider → `500`
+(`PROVIDER_NOT_SUPPORTED`). No endpoint executes generated code; failure
+analysis (`AnalyzeFailureAsync`) stays unimplemented until Slice 6.
 
 ## 8. Execution
 

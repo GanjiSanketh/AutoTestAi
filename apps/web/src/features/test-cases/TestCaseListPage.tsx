@@ -129,10 +129,19 @@ export function TestCaseListPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="ai" disabled title="AI test generation arrives in Slice 4">
-            <Sparkles className="h-4 w-4" aria-hidden />
-            AI Case Generator
-          </Button>
+          {canManage ? (
+            <Link to={`/projects/${projectId}/test-cases/generate`}>
+              <Button variant="ai">
+                <Sparkles className="h-4 w-4" aria-hidden />
+                AI Case Generator
+              </Button>
+            </Link>
+          ) : (
+            <Button variant="ai" disabled title="Generating tests requires the testcases.manage permission">
+              <Sparkles className="h-4 w-4" aria-hidden />
+              AI Case Generator
+            </Button>
+          )}
           {canManage && (
             <Link to={`/projects/${projectId}/test-cases/new`}>
               <Button>

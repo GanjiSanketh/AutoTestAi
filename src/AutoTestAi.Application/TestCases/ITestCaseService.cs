@@ -76,7 +76,11 @@ public sealed record CreateTestCaseCommand(
     string? Status,
     string? SourceType,
     string? SourceCode,
-    JsonElement? StructuredSteps);
+    JsonElement? StructuredSteps,
+    string? GenerationProvider = null,
+    string? GenerationModel = null,
+    long? GenerationLatencyMs = null,
+    JsonDocument? GenerationRequest = null);
 
 public sealed record UpdateTestCaseCommand(
     string Title,

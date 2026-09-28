@@ -18,7 +18,7 @@
 | RBAC | Keycloak + JWT + ICurrentUserService + IAuthorizationService + project_members (Slice 1: /auth/me, JIT provisioning, SignalR subscription checks) |
 | Project management | Projects + project_members (Slice 2: CRUD, soft-delete archive, members + roles, environment metadata, default environment, audit events; list scoped server-side; IDOR-tested) |
 | Test repository | test_cases + test_case_versions (Slice 3: CRUD, project-scoped keys, immutable sequential versioning with concurrency retry, structured-steps JSONB, review lifecycle, archive, filters/search/pagination, list omits source; IDOR-tested) |
-| AI test generation | AI Gateway + provider adapters |
+| AI test generation | AI gateway (`IAiTestGenerator` → `IAiProviderResolver` → `IAiProvider`) + Ollama/OpenAI HTTP adapters (Slice 4: project-scoped `POST …/test-generation`, prompt `test-generation-v1`, structured-output validation, secret redaction, `sourceType=ai` + `Pending` versions via `TestCaseService`, safe provider-status endpoint, audit events; Gemini planned/unsupported; generated code never executed) |
 | Test execution | Temporal + isolated Playwright worker |
 | Live execution | SignalR |
 | Failure analysis | failure_analyses + AI analysis |
@@ -32,7 +32,7 @@
 | NFR | Implementation |
 |---|---|
 | Parallel execution | Horizontally scalable worker pool |
-| AI latency | Provider/model metrics and configuration |
+| AI latency | Server-measured `generation_latency_ms` on every generation (provider/model/prompt-version metadata; token usage captured when reported) |
 | UI performance | Code splitting, query caching, optimized APIs |
 | Encryption | TLS + encrypted persistent storage/secrets infrastructure |
 | Sensitive-data masking | Centralized log redaction |
