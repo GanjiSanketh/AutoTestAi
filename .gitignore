@@ -1,0 +1,40 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.vscode/settings.json
+TestResults/
+coverage/
+
+# Node / frontend / worker
+node_modules/
+apps/web/dist/
+apps/web/dist-ssr/
+workers/playwright/dist/
+*.log
+npm-debug.log*
+
+# Env / secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+*.pfx
+*.pem
+*.key
+secrets/
+credentials.json
+
+# Playwright artifacts
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Docker local volumes / data
+data/
+pgdata/
+
+# OS
+.DS_Store
+Thumbs.db

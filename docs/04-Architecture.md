@@ -1,0 +1,168 @@
+# AutoTest AI — Architecture Specification
+
+**Project:** AutoTest AI  
+**Date:** 2026-09-28  
+**Status:** Baseline Architecture
+
+## 1. Architecture Goals
+
+AutoTest AI is a web-only enterprise application that allows teams to create, manage, execute, analyze, and track automated tests across Web, Mobile, and API targets. The platform itself has no mobile UI; mobile testing is performed by later Appium workers.
+
+Goals:
+- Keep Phase 1 understandable and deployable.
+- Avoid premature microservice complexity.
+- Isolate test execution from the API.
+- Make AI providers replaceable.
+- Support asynchronous durable workflows.
+- Provide real-time execution status through SignalR.
+- Keep project/security boundaries explicit.
+- Allow later Docker-to-k3s/Kubernetes scaling.
+
+## 2. Phase-1 Architecture
+
+```text
+React Web App
+      │ HTTPS
+      ▼
+ASP.NET Core Modular Monolith
+      ├── Identity / Projects / Test Repository
+      ├── AI Generation / Execution / Defects / Tickets / Reports
+      └── Integrations
+          │
+          ├── PostgreSQL (metadata)
+          ├── Temporal (durable workflows)
+          ├── Valkey (cache/ephemeral state)
+          ├── MinIO/S3 (artifacts)
+          └── AI Gateway
+                ├── Ollama (optional/local)
+                ├── OpenAI adapter
+                └── Gemini adapter
+
+Temporal → isolated Web/API/Mobile workers
+Web worker → Playwright + TypeScript
+Mobile worker → Appium (later phase)
+```
+
+## 3. Frontend
+
+React + TypeScript + Vite, React Router, TanStack Query, Zustand, Tailwind CSS, shadcn/ui, Apache ECharts and Monaco where required.
+
+```text
+apps/web/src/
+  app/             providers, router, layout
+  components/      ui, common
+  features/        auth, dashboard, projects, test-cases,
+                   test-execution, bugs, tickets, reports, settings
+  lib/             api, auth, realtime, validation
+  stores/
+  types/
+  styles/
+```
+
+Rules: feature boundaries are explicit; server state belongs to TanStack Query; Zustand is for client state; API calls do not live in presentational components; authentication/authorization are backend-enforced; design must follow `02-Design-System.md` and must not introduce Angular Material, MUI, or unrelated UI systems.
+
+## 4. Backend
+
+```text
+src/
+  AutoTestAi.Api/
+  AutoTestAi.Application/
+    Identity/ Projects/ TestCases/ TestGeneration/
+    TestExecution/ Defects/ Tickets/ Reports/ Integrations/
+  AutoTestAi.Domain/
+  AutoTestAi.Infrastructure/
+  AutoTestAi.Workflows/
+```
+
+Dependency direction:
+
+```text
+Api → Application → Domain
+Infrastructure → Application/Domain
+Workflows → Application/Domain
+```
+
+Domain must not depend on infrastructure implementations.
+
+## 5. Execution Isolation
+
+The API must never execute arbitrary Playwright/Appium/test code directly. Workers run in isolated containers. A worker receives only the execution ID, test revision, environment reference, approved secret references, and execution policy. It returns status, structured result, logs and artifacts.
+
+## 6. AI Provider Abstraction
+
+Business modules depend on an internal abstraction, not vendor SDKs.
+
+```csharp
+public interface IAiProvider
+{
+    Task<AiGenerationResult> GenerateTestAsync(
+        AiGenerationRequest request,
+        CancellationToken cancellationToken);
+
+    Task<AiAnalysisResult> AnalyzeFailureAsync(
+        AiFailureAnalysisRequest request,
+        CancellationToken cancellationToken);
+}
+```
+
+Adapters may include Ollama, OpenAI and Gemini. Local AI is a deployment option, not a platform dependency.
+
+## 7. Workflow
+
+Temporal orchestrates long-running execution:
+
+```text
+CreateExecution → ValidateRevision → PrepareEnvironment
+→ AllocateWorker → RunTest → CollectArtifacts → PersistResult
+→ AnalyzeFailure(if failed) → Defect/Ticket actions → Complete
+```
+
+PostgreSQL remains the application system of record.
+
+## 8. Real-Time
+
+SignalR provides execution status, live logs, worker state and other long-running operation updates. Access to project/execution channels must be authorized before subscription.
+
+## 9. Storage
+
+- PostgreSQL: authoritative relational metadata.
+- MinIO/S3: screenshots, videos, traces, generated artifacts and report exports.
+- Valkey: ephemeral cache, rate limits and short-lived coordination.
+
+## 10. Security
+
+TLS, encrypted persistent storage, Keycloak/OIDC, server-side RBAC, project authorization, secret references, log redaction and audit events are mandatory architectural concerns. Credentials must not appear in generated test source or logs unless explicitly approved and masked.
+
+## 11. Deployment Evolution
+
+Phase 1 uses Docker/Docker Compose. Later k3s/Kubernetes can scale API replicas, workflow workers and execution worker pools. Application code should not require Kubernetes-specific assumptions in MVP.
+
+## 12. Observability
+
+Use OpenTelemetry, Prometheus, Grafana, Loki and Tempo. Major operations carry correlation/execution IDs. Track API latency, AI latency, execution duration, worker utilization, pass/fail rate, flakiness, ticket latency, workflow failures and backlog.
+
+## 13. Authentication & Authorization (Slice 1)
+
+Keycloak is the sole identity provider (OIDC). The chain is:
+
+```text
+Keycloak login (React/oidc-client-ts, code flow)
+  → JWT access token (aud: autotestai-api via realm audience mapper)
+  → API validates issuer/audience/signature/expiry (ASP.NET Core JwtBearer)
+  → ICurrentUserService (claims → sub/email/name/roles, realm_access aware)
+  → permissions resolved from realm roles (Application/Authorization)
+  → project access via project_members (admin role bypasses membership)
+  → execution/SignalR access via execution → project resolution
+```
+
+Rules:
+
+- Frontend route guards and hidden navigation are UX only; the backend
+  enforces every boundary (401 anonymous, 403 unauthorized, never 500).
+- `users.external_identity_id` (Keycloak `sub`) is the stable identity key;
+  email is never used as the key. First authenticated API access provisions
+  the application user row (JIT); provisioning never fails the request.
+- Without a database, authorization fails closed (deny-all stores).
+- `/hubs/execution` requires authentication; `SubscribeToExecution` resolves
+  the execution's project and enforces `executions.read` + membership before
+  joining the group. Event names are unchanged.

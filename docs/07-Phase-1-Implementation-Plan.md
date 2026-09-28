@@ -1,0 +1,75 @@
+# AutoTest AI — Phase 1 Implementation Plan
+
+**Phase:** MVP Core
+
+## 1. Scope
+
+Included: authentication/authorization, application shell, real dashboard data, projects, test repository, manual test creation/editing, AI test generation, human review, Playwright TypeScript execution, execution history, live logs/status, basic failure analysis, defect creation, manual Jira ticket creation, basic audit events, observability and Docker local deployment.
+
+Deferred: full 100-worker production grid, Appium/mobile execution, autonomous authoring, predictive flakiness, autonomous suite maintenance, complete CI/CD ecosystem, advanced visual regression, Kubernetes-first deployment, mandatory local AI and automatic ticketing for every failure.
+
+## 2. Delivery Sequence
+
+### Phase 0 — Foundation
+Repository structure, Docker Compose, PostgreSQL, Keycloak, Valkey, MinIO, Temporal, API/React skeletons, configuration, logging and health endpoints.
+
+### Phase 1 — Authentication + Shell
+Login/logout, protected routes, role-aware navigation, sidebar/topbar, responsive layout and design tokens.
+
+### Phase 2 — Projects
+CRUD, project details, members and environment metadata.
+
+### Phase 3 — Test Repository
+List, search/filter, create/edit, version history, source editor, structured steps and review status.
+
+### Phase 4 — AI Generator
+Generation form, AI gateway, provider abstraction, Ollama development adapter, cloud adapter, structured output validation and generated-test preview.
+
+### Phase 5 — Execution
+Playwright TypeScript worker, Docker worker, Temporal workflow, execution creation, persisted status, logs, screenshots, traces and history.
+
+### Phase 6 — Failure Analysis + Bugs
+Failure classification, AI root-cause analysis, confidence/evidence, defect creation and bug views.
+
+### Phase 7 — Jira
+Integration configuration, connection test, manual ticket creation and external ticket reference.
+
+### Phase 8 — Dashboard + Reports
+KPI cards, execution trend, pass/fail, bug severity, recent execution, integration status and initial quality metrics.
+
+## 3. Definition of Done
+
+A feature is complete only when its backend endpoint, authorization, validation, migration, frontend integration, loading/empty/error states, tests, OpenAPI update and security/audit considerations are present. No production-looking hardcoded data remains.
+
+## 4. Testing Strategy
+
+Unit: domain rules, application services, validation, AI parsing and permissions. Integration: PostgreSQL, API, Keycloak, workflow initiation and artifact storage. E2E: login → project → test → AI generation → review → execution → result → failure analysis → defect → Jira.
+
+## 5. Repository
+
+```text
+AutoTestAi/
+├── apps/web/
+├── src/
+│   ├── AutoTestAi.Api/
+│   ├── AutoTestAi.Application/
+│   ├── AutoTestAi.Domain/
+│   ├── AutoTestAi.Infrastructure/
+│   └── AutoTestAi.Workflows/
+├── workers/playwright/
+├── tests/
+├── deploy/docker/
+├── docs/
+├── scripts/
+└── docker-compose.yml
+```
+
+## 6. First Vertical Slice
+
+```text
+Login → Create Project → Create Test Case → Generate Test with AI
+→ Review/Save Version → Execute with Playwright Worker
+→ Persist Result → Live Status → Failure Analysis
+```
+
+Build this slice before implementing every screen independently. It validates frontend, API, database, workflow, worker, storage and AI architecture together.

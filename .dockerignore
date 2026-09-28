@@ -1,0 +1,11 @@
+bin/
+obj/
+node_modules/
+apps/web/node_modules/
+apps/web/dist/
+workers/playwright/node_modules/
+workers/playwright/dist/
+.git/
+.env
+*.md
+!README.md
