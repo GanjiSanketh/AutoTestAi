@@ -47,6 +47,7 @@ public static class DependencyInjection
             services.AddScoped<IDefectStore, Defects.EfDefectStore>();
             services.AddScoped<Application.Tickets.ITicketStore, Tickets.EfTicketStore>();
             services.AddScoped<Application.Tickets.IIntegrationStore, Tickets.EfIntegrationStore>();
+            services.AddScoped<Application.Reports.IReportQueryStore, Reports.EfReportQueryStore>();
         }
         else
         {
@@ -61,6 +62,7 @@ public static class DependencyInjection
             services.AddSingleton<IDefectStore, Defects.UnavailableDefectStore>();
             services.AddSingleton<Application.Tickets.ITicketStore, Tickets.UnavailableTicketStore>();
             services.AddSingleton<Application.Tickets.IIntegrationStore, Tickets.UnavailableIntegrationStore>();
+            services.AddSingleton<Application.Reports.IReportQueryStore, Reports.UnavailableReportQueryStore>();
         }
 
         // Dapper remains referenced for future read-model queries (docs/04);

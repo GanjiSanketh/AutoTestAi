@@ -91,6 +91,10 @@ users/projects → audit_events
 
 Index project membership, project/test status, test versions, execution project/status, execution-test status, execution-log `(execution_test_id,timestamp)`, defects `(project_id,status)`, tickets `(project_id,sync_status)`, and audit `(project_id,created_at)`.
 
+Slice 8 reporting adds no tables and no indexes: dashboard/report
+aggregates reuse these source-of-truth tables and existing indexes with
+bounded UTC date ranges (default 30 days, max 365).
+
 ## 5. JSONB
 
 Use JSONB for variable structures such as structured test steps, AI metadata, execution metadata, evidence and provider-specific integration configuration. Core queryable business fields remain relational.

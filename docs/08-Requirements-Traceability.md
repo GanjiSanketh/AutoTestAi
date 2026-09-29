@@ -24,7 +24,7 @@
 | Failure analysis | `failure_analyses` attempts + `IAiProvider.AnalyzeFailureAsync` (Slice 6: bounded redacted evidence, prompt `failure-analysis-v1`, validated advisory output, attempt history, no execution mutation) |
 | Defect management | `defects` (Slice 6: explicit human creation from failed executions, server-derived relationships, validated status lifecycle, audited changes, list/detail UI; no external tickets yet) |
 | Jira | tickets + integrations (Slice 7: manual `POST …/defects/{id}/ticket` via `TicketService` → `IJiraTicketProvider` → Infrastructure Jira adapter; project Jira config via `PUT …/integrations/jira` with secret-safe status; idempotent per defect per integration; no auto-ticketing, sync, or webhooks) |
-| Quality dashboard | dashboard API + ECharts |
+| Quality dashboard | dashboard + reports API + ECharts (Slice 8: project-scoped read-only `IDashboardService`/`IReportService` over EF aggregates; summary/trend/failure-breakdown/defect/ticket overviews; paginated execution/defect/ticket reports; pass rate = Passed ÷ terminal, null when empty; deterministic classification authoritative; ticket metrics from internal records, never Jira; no prediction, AI analytics, or exports) |
 | Audit | audit_events |
 
 ## 3. NFR Traceability

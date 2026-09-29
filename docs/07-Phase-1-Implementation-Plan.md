@@ -38,8 +38,12 @@ key/URL reference. Idempotent per defect per integration; failure states
 are retryable. No automatic ticketing, AI ticketing, bidirectional sync,
 webhooks, polling, or Azure DevOps.
 
-### Phase 8 — Dashboard + Reports
-KPI cards, execution trend, pass/fail, bug severity, recent execution, integration status and initial quality metrics.
+### Phase 8 — Dashboard + Reports (implemented, Slice 8)
+Project-scoped read-only dashboard (KPI cards, execution trend,
+deterministic failure-classification breakdown, severity distribution,
+recent executions/defects/tickets, audit activity feed) and paginated
+execution/defect/ticket reports with server-side filtering. Descriptive
+metrics only: no prediction, AI analytics, exports, or real-time engine.
 
 ## 3. Definition of Done
 

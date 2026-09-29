@@ -138,6 +138,24 @@ One successful ticket per defect per integration is enforced by an
 application check plus a unique filtered index; failed attempts persist a
 retryable Failed row and never a false success.
 
+Slice-8 quality dashboard and reports (read-only descriptive analytics):
+
+```text
+React Dashboard/Reports (ECharts, TanStack Query)
+  → REST reporting API (project-scoped, dashboard.read / reports.read)
+  → DashboardService / ReportService (auth, range validation, shaping)
+  → IReportQueryStore → EF Core server-side aggregates → PostgreSQL
+```
+
+Reporting reuses the source-of-truth tables (no analytics tables, no
+migration); queries are bounded by a validated UTC date range (default
+last 30 days, max 365). Pass rate = Passed ÷ terminal executions
+(Passed/Failed/Cancelled/TimedOut/Error; Queued/Running excluded), null
+when nothing is terminal. Failure charts use the deterministic
+`ExecutionTest.FailureClassification`; AI advisory output never feeds
+metrics. Ticket metrics come from internal `Ticket` records — rendering
+never contacts Jira, so dashboard availability never depends on it.
+
 ## 6. AI Provider Abstraction
 
 Business modules depend on an internal abstraction, not vendor SDKs.

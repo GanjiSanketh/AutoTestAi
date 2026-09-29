@@ -50,14 +50,47 @@ return `403` (not `404`) to avoid leaking project existence.
 The `autotestai-web` realm client maps audience `autotestai-api` into access
 tokens so API audience validation succeeds.
 
-## 4. Dashboard
+## 4. Dashboard & Reports
+
+Implemented in Phase 1 Slice 8. Read-only descriptive analytics over
+persisted Slices 1–7 data. All routes are project-scoped, require
+membership (admin bypass), and never mutate state, call AI providers, or
+contact Jira. Dashboard reads require `dashboard.read`; reports require
+`reports.read`. Unknown/inaccessible projects return `403`.
+
+Date range: optional `from`/`to` (ISO-8601; date-only values are UTC
+calendar days). Defaults to the last 30 days; maximum 365 days;
+`from <= to` is enforced (`400` otherwise). Timestamps stay UTC.
 
 ```http
-GET /api/v1/dashboard/summary
-GET /api/v1/dashboard/execution-trend
-GET /api/v1/dashboard/bug-severity
-GET /api/v1/dashboard/integration-status
+GET /api/v1/projects/{projectId}/dashboard/summary?from=&to=
+GET /api/v1/projects/{projectId}/dashboard/execution-trend?from=&to=&granularity=
+GET /api/v1/projects/{projectId}/dashboard/failure-breakdown?from=&to=
+GET /api/v1/projects/{projectId}/dashboard/defects?from=&to=
+GET /api/v1/projects/{projectId}/dashboard/tickets?from=&to=
+GET /api/v1/projects/{projectId}/reports/executions?from=&to=&status=&testCaseId=&classification=&page=&pageSize=
+GET /api/v1/projects/{projectId}/reports/defects?from=&to=&status=&severity=&classification=&search=&page=&pageSize=
+GET /api/v1/projects/{projectId}/reports/tickets?from=&to=&provider=&syncStatus=&page=&pageSize=
 ```
+
+Semantics:
+
+- KPIs: test-case totals (+ approved = latest version `Approved`);
+  execution totals by `ExecutionStatus`; pass rate = `Passed ÷ terminal`
+  where terminal = Passed/Failed/Cancelled/TimedOut/Error (Queued/Running
+  excluded), `null` when no terminal executions (never `NaN`, never a
+  misleading `0%`); defect totals by `DefectStatus` + high/critical count;
+  ticket totals by `TicketSyncStatus` from internal records.
+- Trend: daily UTC buckets (weekly when the range exceeds 62 days or
+  `granularity=week`); missing days render as zeros server-side.
+- Failure breakdown: authoritative deterministic
+  `ExecutionTest.FailureClassification` over terminal tests only; `Unknown`
+  appears only when such rows exist. AI advisory output is never consulted.
+- Recent lists are bounded (8); activity reuses `audit_events` with a fixed
+  safe-action whitelist (no metadata payloads).
+- Reports paginate with the established `{items,totalCount,page,pageSize}`
+  envelope (max page size 100). Invalid enum filters return `400` with field
+  details. No secrets, logs, artifacts, or credentials appear in responses.
 
 Dashboard values must come from persisted backend data, not hardcoded demo values.
 

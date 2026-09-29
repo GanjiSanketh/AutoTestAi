@@ -219,6 +219,7 @@ app.MapExecutionEndpoints();
 app.MapFailureAnalysisEndpoints();
 app.MapDefectEndpoints();
 app.MapTicketEndpoints();
+app.MapDashboardEndpoints();
 app.MapHub<ExecutionHub>("/hubs/execution");
 
 if (!authOptions.Configured)
