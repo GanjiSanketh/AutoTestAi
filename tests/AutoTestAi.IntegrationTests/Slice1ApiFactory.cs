@@ -91,7 +91,7 @@ public sealed class FakeWorkflowCoordinator : IExecutionWorkflowCoordinator
 /// Slice-1 factory: real JwtBearer validation (HMAC, offline metadata),
 /// InMemory EF instead of Postgres, fake workflow starter.
 /// </summary>
-public sealed class Slice1ApiFactory : WebApplicationFactory<Program>
+public class Slice1ApiFactory : WebApplicationFactory<Program>
 {
     private readonly string _databaseName = $"slice1-{Guid.NewGuid():N}";
 
@@ -161,6 +161,10 @@ public sealed class Slice1ApiFactory : WebApplicationFactory<Program>
             services.AddScoped<IExecutionStore, EfExecutionStore>();
             services.RemoveAll<IDefectStore>();
             services.AddScoped<IDefectStore, EfDefectStore>();
+            services.RemoveAll<AutoTestAi.Application.Tickets.ITicketStore>();
+            services.AddScoped<AutoTestAi.Application.Tickets.ITicketStore, AutoTestAi.Infrastructure.Tickets.EfTicketStore>();
+            services.RemoveAll<AutoTestAi.Application.Tickets.IIntegrationStore>();
+            services.AddScoped<AutoTestAi.Application.Tickets.IIntegrationStore, AutoTestAi.Infrastructure.Tickets.EfIntegrationStore>();
             services.AddSingleton<IExecutionWorkflowCoordinator>(WorkflowCoordinator);
             services.RemoveAll<ITestExecutionWorkflowStarter>();
             services.AddSingleton<ITestExecutionWorkflowStarter>(new FakeWorkflowStarter());

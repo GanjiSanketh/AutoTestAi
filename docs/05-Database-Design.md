@@ -79,10 +79,10 @@ users/projects → audit_events
 `id UUID PK`, `project_id FK`, `execution_test_id` (failed execution this defect was filed against), `failure_analysis_id NULL` (advisory analysis linked at creation, if any), `title`, `description`, `severity`, `status`, `root_cause_type`, `ai_confidence` (copied from the linked analysis, if any), `created_by`, timestamps.
 
 ### tickets
-`id UUID PK`, `project_id FK`, `defect_id`, `provider`, `external_ticket_id`, `external_url`, `title`, `status`, `sync_status`, timestamps; unique `(project_id,provider,external_ticket_id)`.
+`id UUID PK`, `project_id FK`, `defect_id`, `integration_id NULL` (Slice-7 Jira row; NULL for pre-Slice-7 rows), `provider`, `external_ticket_id`, `external_key NULL` (e.g. ABC-123), `external_url`, `title`, `status`, `sync_status` (Pending/Synced/Failed), `created_by NULL`, `last_error NULL` (safe diagnostic, ≤2000), timestamps; unique `(project_id,provider,external_ticket_id)`; unique filtered `(defect_id,integration_id) WHERE sync_status='Synced'` (one successful Jira ticket per defect per integration; Failed rows stay retryable); index `(defect_id)`.
 
 ### integrations
-`id UUID PK`, `project_id`, `provider`, `integration_type`, `configuration JSONB`, `secret_reference`, `status`, timestamps.
+`id UUID PK`, `project_id`, `provider`, `integration_type`, `configuration JSONB`, `secret_reference`, `status`, timestamps. Slice 7 Jira shape: `configuration = {baseUrl, projectKey, email, issueType, priorityMapping, appBaseUrl?}` (no secrets — the API token lives in `secret_reference` server-side only); unique filtered `(project_id,provider) WHERE project_id IS NOT NULL` (one Jira row per project).
 
 ### audit_events
 `id BIGSERIAL PK`, `actor_user_id`, `action`, `entity_type`, `entity_id`, `project_id`, `ip_address`, `user_agent`, `metadata JSONB`, `created_at`.

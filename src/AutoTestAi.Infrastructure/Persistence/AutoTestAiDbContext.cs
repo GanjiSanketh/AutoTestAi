@@ -136,9 +136,23 @@ public sealed class AutoTestAiDbContext : DbContext
         modelBuilder.Entity<Ticket>()
             .HasIndex(t => new { t.ProjectId, t.Provider, t.ExternalTicketId }).IsUnique();
         modelBuilder.Entity<Ticket>().HasIndex(t => new { t.ProjectId, t.SyncStatus });
+        modelBuilder.Entity<Ticket>().HasIndex(t => t.DefectId);
+        // Slice 7: one successful Jira ticket per defect per integration.
+        // Only Synced rows participate so failed attempts remain retryable.
+        modelBuilder.Entity<Ticket>()
+            .HasIndex(t => new { t.DefectId, t.IntegrationId })
+            .IsUnique()
+            .HasFilter("\"DefectId\" IS NOT NULL AND \"IntegrationId\" IS NOT NULL AND \"SyncStatus\" = 'Synced'");
         modelBuilder.Entity<Ticket>().Property(t => t.SyncStatus).HasConversion<string>();
+        modelBuilder.Entity<Ticket>().Property(t => t.ExternalKey).HasMaxLength(50);
+        modelBuilder.Entity<Ticket>().Property(t => t.LastError).HasMaxLength(2000);
         modelBuilder.Entity<Integration>().ToTable("integrations");
         modelBuilder.Entity<Integration>().HasIndex(i => i.ProjectId);
+        // Slice 7: at most one Jira integration row per project.
+        modelBuilder.Entity<Integration>()
+            .HasIndex(i => new { i.ProjectId, i.Provider })
+            .IsUnique()
+            .HasFilter("\"ProjectId\" IS NOT NULL");
         modelBuilder.Entity<Integration>().Property(i => i.Configuration).HasColumnType("jsonb");
         modelBuilder.Entity<Integration>().Property(i => i.Status).HasConversion<string>();
 

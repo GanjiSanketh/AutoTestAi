@@ -1,9 +1,13 @@
 namespace AutoTestAi.Application.Tickets;
 
-/// <summary>Phase-1 seam for manual ticket creation (FR-3.5). Implemented in Phase 1.</summary>
+/// <summary>
+/// Manual ticket creation seam (FR-3.5, Slice 7). Human-triggered only:
+/// create a Jira ticket from an internal defect. The defect remains the
+/// system of record.
+/// </summary>
 public interface ITicketService
 {
-    Task<Guid> CreateManualTicketAsync(CreateTicketCommand command, CancellationToken cancellationToken);
-}
+    Task<TicketDto> CreateFromDefectAsync(Guid projectId, Guid defectId, CancellationToken cancellationToken);
 
-public sealed record CreateTicketCommand(Guid DefectId, string Provider, string Title);
+    Task<TicketDto?> GetForDefectAsync(Guid projectId, Guid defectId, CancellationToken cancellationToken);
+}

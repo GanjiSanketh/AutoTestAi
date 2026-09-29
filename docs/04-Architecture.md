@@ -118,8 +118,25 @@ Failed execution → bounded redacted evidence → IAiProvider.AnalyzeFailureAsy
 
 Analysis never mutates execution history and never creates defects; defects
 derive project/execution/test/version relationships server-side from the
-referenced failed execution. External ticketing (Jira/Azure DevOps) is a
-later slice; defects are internal records until then.
+referenced failed execution.
+
+Slice-7 manual Jira ticketing (human-owned external sync):
+
+```text
+Human (tickets.create) → POST …/defects/{id}/ticket → TicketService
+  → IntegrationResolver (project Jira row) → IJiraTicketProvider
+  → Infrastructure Jira HTTP adapter (Basic auth server-side)
+  → Jira REST /rest/api/3/issue → Ticket (Synced) + audit
+```
+
+The internal defect remains the system of record; Jira is an external
+creation target. Creation is synchronous and manual-only — execution
+failure, analysis completion, defect creation/status changes, and AI
+never create tickets. Application code never touches Jira HTTP details;
+Infrastructure owns transport, auth, DTOs, and status interpretation.
+One successful ticket per defect per integration is enforced by an
+application check plus a unique filtered index; failed attempts persist a
+retryable Failed row and never a false success.
 
 ## 6. AI Provider Abstraction
 

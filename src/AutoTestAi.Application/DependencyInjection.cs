@@ -37,6 +37,8 @@ public static class DependencyInjection
         services.AddScoped<IFailureEvidenceService, FailureEvidenceService>();
         services.AddScoped<IFailureAnalysisService, FailureAnalysisService>();
         services.AddScoped<IDefectService, DefectService>();
+        services.AddScoped<Tickets.ITicketService, Tickets.TicketService>();
+        services.AddScoped<Tickets.IJiraIntegrationService, Tickets.JiraIntegrationService>();
         services.AddScoped<IAiTestGenerator, TestGenerationService>();
         services.AddScoped<IAuditService, AuditService>();
         return services;

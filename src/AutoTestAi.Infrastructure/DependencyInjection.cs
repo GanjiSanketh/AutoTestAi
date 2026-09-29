@@ -45,6 +45,8 @@ public static class DependencyInjection
             services.AddScoped<ITestCaseStore, EfTestCaseStore>();
             services.AddScoped<IExecutionStore, EfExecutionStore>();
             services.AddScoped<IDefectStore, Defects.EfDefectStore>();
+            services.AddScoped<Application.Tickets.ITicketStore, Tickets.EfTicketStore>();
+            services.AddScoped<Application.Tickets.IIntegrationStore, Tickets.EfIntegrationStore>();
         }
         else
         {
@@ -57,6 +59,8 @@ public static class DependencyInjection
             services.AddSingleton<ITestCaseStore, UnavailableTestCaseStore>();
             services.AddSingleton<IExecutionStore, Executions.UnavailableExecutionStore>();
             services.AddSingleton<IDefectStore, Defects.UnavailableDefectStore>();
+            services.AddSingleton<Application.Tickets.ITicketStore, Tickets.UnavailableTicketStore>();
+            services.AddSingleton<Application.Tickets.IIntegrationStore, Tickets.UnavailableIntegrationStore>();
         }
 
         // Dapper remains referenced for future read-model queries (docs/04);
@@ -75,6 +79,10 @@ public static class DependencyInjection
         // Playwright execution plane (Slice 5 §36): HTTP boundary, token server-side.
         services.AddHttpClient("playwright-worker");
         services.AddTransient<IPlaywrightWorkerClient, Executions.PlaywrightWorkerClient>();
+
+        // Slice 7: Jira ticketing boundary (manual creation only; token server-side).
+        services.AddHttpClient(Jira.JiraTicketProvider.HttpClientName);
+        services.AddTransient<Application.Tickets.IJiraTicketProvider, Jira.JiraTicketProvider>();
 
         return services;
     }

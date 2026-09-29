@@ -11,6 +11,7 @@ import { Modal } from '../../components/ui/modal';
 import { ErrorState } from '../../components/common/ErrorState';
 import { ApiError } from '../../lib/api/client';
 import { defectEndpoints, defectKeys } from '../../lib/api/endpoints/defects';
+import { ticketEndpoints, ticketKeys, ticketErrorMessage } from '../../lib/api/endpoints/tickets';
 import { useProfile } from '../../lib/auth/useProfile';
 import { Permissions, hasPermission } from '../../lib/auth/permissions';
 import { defectStatusTone, severityTone } from './DefectsListPage';
@@ -35,9 +36,15 @@ export function DefectDetailsPage() {
   const profile = useProfile();
   const queryClient = useQueryClient();
   const canManage = hasPermission(profile.data?.permissions, Permissions.BugsManage);
+  const canCreateTicket = hasPermission(profile.data?.permissions, Permissions.TicketsCreate);
+  const canReadTicket = hasPermission(profile.data?.permissions, Permissions.TicketsRead);
+  const canConfigureJira = hasPermission(profile.data?.permissions, Permissions.SettingsManage);
 
   const [editOpen, setEditOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
+  const [ticketConfirmOpen, setTicketConfirmOpen] = useState(false);
+  const [ticketError, setTicketError] = useState<string | null>(null);
+  const [ticketSuccess, setTicketSuccess] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState('Medium');
@@ -51,10 +58,42 @@ export function DefectDetailsPage() {
     retry: false,
   });
 
+  const jiraStatus = useQuery({
+    queryKey: ticketKeys.jiraStatus(projectId),
+    queryFn: () => ticketEndpoints.jiraStatus(projectId),
+    enabled: !!projectId && !!defectId && canReadTicket,
+    retry: false,
+  });
+
+  const defectTicket = useQuery({
+    queryKey: ticketKeys.defectTicket(projectId, defectId),
+    queryFn: () => ticketEndpoints.getForDefect(projectId, defectId),
+    enabled: !!projectId && !!defectId && canReadTicket,
+    retry: false,
+  });
+
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: defectKeys.details(projectId, defectId) });
     void queryClient.invalidateQueries({ queryKey: defectKeys.all });
+    void queryClient.invalidateQueries({ queryKey: ticketKeys.defectTicket(projectId, defectId) });
   };
+
+  const createTicket = useMutation({
+    mutationFn: () => ticketEndpoints.createForDefect(projectId, defectId),
+    onSuccess: (ticket) => {
+      setTicketConfirmOpen(false);
+      setTicketError(null);
+      setTicketSuccess(
+        ticket.alreadyExisted
+          ? `A Jira ticket already exists for this defect (${ticket.externalKey ?? 'see Jira'}).`
+          : `Jira ticket ${ticket.externalKey ?? ''} created.`.trim(),
+      );
+      invalidate();
+    },
+    onError: (error: ApiError) => {
+      setTicketError(ticketErrorMessage(error.status, error.code));
+    },
+  });
 
   const update = useMutation({
     mutationFn: () =>
@@ -226,6 +265,78 @@ export function DefectDetailsPage() {
             )}
           </CardContent>
         </Card>
+
+        {canReadTicket && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Jira ticket</CardTitle>
+              <CardDescription>Manual external ticket. The defect remains the system of record.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              {ticketSuccess && (
+                <div role="status" className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700">
+                  {ticketSuccess}
+                </div>
+              )}
+              {ticketError && (
+                <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700">
+                  {ticketError}
+                </div>
+              )}
+              {defectTicket.isLoading || jiraStatus.isLoading ? (
+                <Skeleton className="h-16" />
+              ) : defectTicket.data?.externalKey ? (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-sm font-semibold text-slate-900">{defectTicket.data.externalKey}</span>
+                    <Badge tone="success">{defectTicket.data.syncStatus}</Badge>
+                  </div>
+                  <MetaRow label="Provider" value={defectTicket.data.provider} />
+                  <MetaRow label="Created" value={new Date(defectTicket.data.createdAt).toLocaleString()} />
+                  {defectTicket.data.externalUrl && /^https?:\/\//i.test(defectTicket.data.externalUrl) && (
+                    <a
+                      href={defectTicket.data.externalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block font-medium text-brand-700 hover:text-brand-600"
+                    >
+                      Open in Jira →
+                    </a>
+                  )}
+                </div>
+              ) : jiraStatus.data && !jiraStatus.data.configured ? (
+                <div className="space-y-2">
+                  <p className="text-slate-600">Jira is not configured for this project.</p>
+                  {canConfigureJira && (
+                    <Link to="/settings" className="font-medium text-brand-700 hover:text-brand-600">
+                      Open integration settings →
+                    </Link>
+                  )}
+                </div>
+              ) : jiraStatus.data && !jiraStatus.data.enabled ? (
+                <p className="text-slate-600">The Jira integration is disabled for this project.</p>
+              ) : canCreateTicket ? (
+                <div className="space-y-2">
+                  <p className="text-slate-600">
+                    {jiraStatus.data?.projectKey
+                      ? `Create an external issue in Jira project ${jiraStatus.data.projectKey}.`
+                      : 'Create an external Jira issue from this defect.'}
+                  </p>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={createTicket.isPending}
+                    onClick={() => { setTicketError(null); setTicketSuccess(null); setTicketConfirmOpen(true); }}
+                  >
+                    {createTicket.isPending ? 'Creating…' : 'Create Jira Ticket'}
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-slate-600">You do not have permission to create Jira tickets for this project.</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {editOpen && (
@@ -309,6 +420,36 @@ export function DefectDetailsPage() {
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {ticketConfirmOpen && (
+        <Modal
+          title="Create Jira ticket"
+          description="This creates an external Jira issue. This is a manual action — nothing is created automatically."
+          onClose={() => { if (!createTicket.isPending) setTicketConfirmOpen(false); }}
+        >
+          <div className="space-y-3 text-sm text-slate-700">
+            <p>
+              Create a Jira issue from defect <span className="font-medium text-slate-900">{item.title}</span>
+              {jiraStatus.data?.projectKey ? (
+                <> in Jira project <span className="font-mono">{jiraStatus.data.projectKey}</span></>
+              ) : null}
+              ?
+            </p>
+            <p className="text-slate-500">
+              The internal defect remains the system of record. Only safe defect details are sent to Jira —
+              no credentials or secrets leave this server.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setTicketConfirmOpen(false)} disabled={createTicket.isPending}>
+                Cancel
+              </Button>
+              <Button type="button" size="sm" onClick={() => createTicket.mutate()} disabled={createTicket.isPending}>
+                {createTicket.isPending ? 'Creating…' : 'Confirm creation'}
+              </Button>
+            </div>
+          </div>
         </Modal>
       )}
     </div>

@@ -58,6 +58,8 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Ex
             AutoTestAi.Application.Common.ConflictException => (HttpStatusCode.Conflict, "CONFLICT", ex.Message, (IReadOnlyList<object>)Array.Empty<object>()),
             AutoTestAi.Application.Common.NotFoundException => (HttpStatusCode.NotFound, "NOT_FOUND", ex.Message, (IReadOnlyList<object>)Array.Empty<object>()),
             AutoTestAi.Application.AI.AiProviderException ai => MapAiProviderError(ai),
+            AutoTestAi.Application.Tickets.RateLimitedException => (HttpStatusCode.TooManyRequests, "RATE_LIMITED", ex.Message, (IReadOnlyList<object>)Array.Empty<object>()),
+            AutoTestAi.Application.Tickets.JiraProviderException jira => MapJiraError(jira),
             ArgumentException => (HttpStatusCode.BadRequest, "VALIDATION_ERROR", ex.Message, (IReadOnlyList<object>)Array.Empty<object>()),
             InvalidOperationException invalidOp => (HttpStatusCode.ServiceUnavailable, "DEPENDENCY_UNAVAILABLE", FriendlyDependencyMessage(invalidOp), (IReadOnlyList<object>)Array.Empty<object>()),
             _ => (HttpStatusCode.InternalServerError, "INTERNAL_ERROR", "An unexpected error occurred.", (IReadOnlyList<object>)Array.Empty<object>())
@@ -117,6 +119,32 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Ex
             AutoTestAi.Application.AI.AiProviderErrorKind.NotConfigured =>
                 (HttpStatusCode.ServiceUnavailable, "PROVIDER_NOT_CONFIGURED", ex.Message, empty),
             _ => (HttpStatusCode.InternalServerError, "PROVIDER_NOT_SUPPORTED", ex.Message, empty),
+        };
+    }
+
+    private static (HttpStatusCode Status, string Code, string Message, IReadOnlyList<object> Details)
+        MapJiraError(AutoTestAi.Application.Tickets.JiraProviderException ex)
+    {
+        var empty = (IReadOnlyList<object>)Array.Empty<object>();
+        return ex.Kind switch
+        {
+            AutoTestAi.Application.Tickets.JiraErrorKind.Validation =>
+                (HttpStatusCode.BadRequest, "VALIDATION_ERROR", ex.Message, empty),
+            AutoTestAi.Application.Tickets.JiraErrorKind.Authentication =>
+                (HttpStatusCode.BadGateway, "JIRA_AUTH_FAILED", ex.Message, empty),
+            AutoTestAi.Application.Tickets.JiraErrorKind.Permission =>
+                (HttpStatusCode.BadGateway, "JIRA_FORBIDDEN", ex.Message, empty),
+            AutoTestAi.Application.Tickets.JiraErrorKind.NotFound =>
+                (HttpStatusCode.NotFound, "NOT_FOUND", ex.Message, empty),
+            AutoTestAi.Application.Tickets.JiraErrorKind.Conflict =>
+                (HttpStatusCode.Conflict, "CONFLICT", ex.Message, empty),
+            AutoTestAi.Application.Tickets.JiraErrorKind.RateLimited =>
+                (HttpStatusCode.TooManyRequests, "RATE_LIMITED", ex.Message, empty),
+            AutoTestAi.Application.Tickets.JiraErrorKind.Timeout =>
+                (HttpStatusCode.ServiceUnavailable, "PROVIDER_TIMEOUT", ex.Message, empty),
+            AutoTestAi.Application.Tickets.JiraErrorKind.Cancelled =>
+                (HttpStatusCode.ServiceUnavailable, "PROVIDER_UNAVAILABLE", ex.Message, empty),
+            _ => (HttpStatusCode.BadGateway, "JIRA_UNAVAILABLE", ex.Message, empty),
         };
     }
 

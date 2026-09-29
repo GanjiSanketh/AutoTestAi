@@ -27,12 +27,22 @@ public sealed class Ticket : EntityBase
 {
     public Guid ProjectId { get; set; }
     public Guid? DefectId { get; set; }
+    /// <summary>
+    /// Jira (or other provider) integration this ticket was created through.
+    /// Nullable for pre-Slice-7 rows; required for Slice-7 manual Jira tickets.
+    /// </summary>
+    public Guid? IntegrationId { get; set; }
     public string Provider { get; set; } = string.Empty;
     public string? ExternalTicketId { get; set; }
+    /// <summary>Human-readable provider key (e.g. Jira ABC-123).</summary>
+    public string? ExternalKey { get; set; }
     public string? ExternalUrl { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? Status { get; set; }
     public TicketSyncStatus SyncStatus { get; set; } = TicketSyncStatus.Pending;
+    public Guid? CreatedBy { get; set; }
+    /// <summary>Safe diagnostic for the last failed creation attempt (never secrets).</summary>
+    public string? LastError { get; set; }
 }
 
 /// <summary>

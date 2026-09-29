@@ -23,7 +23,7 @@
 | Live execution | SignalR |
 | Failure analysis | `failure_analyses` attempts + `IAiProvider.AnalyzeFailureAsync` (Slice 6: bounded redacted evidence, prompt `failure-analysis-v1`, validated advisory output, attempt history, no execution mutation) |
 | Defect management | `defects` (Slice 6: explicit human creation from failed executions, server-derived relationships, validated status lifecycle, audited changes, list/detail UI; no external tickets yet) |
-| Jira | tickets + integrations |
+| Jira | tickets + integrations (Slice 7: manual `POST …/defects/{id}/ticket` via `TicketService` → `IJiraTicketProvider` → Infrastructure Jira adapter; project Jira config via `PUT …/integrations/jira` with secret-safe status; idempotent per defect per integration; no auto-ticketing, sync, or webhooks) |
 | Quality dashboard | dashboard API + ECharts |
 | Audit | audit_events |
 

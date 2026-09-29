@@ -314,19 +314,80 @@ severity_changed/reopened`).
 
 ## 10. Tickets
 
-MVP manual creation:
+Implemented in Phase 1 Slice 7. Manual Jira creation only — the internal
+defect is the system of record and Jira is an external creation target.
+No automatic, AI-driven, or webhook/polling behavior exists.
 
 ```http
-POST /api/v1/bugs/{bugId}/tickets
-GET  /api/v1/projects/{projectId}/tickets
-GET  /api/v1/tickets/{ticketId}
+POST /api/v1/projects/{projectId}/defects/{defectId}/ticket
+GET  /api/v1/projects/{projectId}/defects/{defectId}/ticket
+GET  /api/v1/projects/{projectId}/integrations/jira/status
+PUT  /api/v1/projects/{projectId}/integrations/jira
 ```
 
-Later synchronization:
+Create response (`→ 201` new, `→ 200` when the ticket already exists):
 
-```http
-POST /api/v1/tickets/{ticketId}/sync
+```json
+{
+  "id": "uuid",
+  "projectId": "uuid",
+  "defectId": "uuid",
+  "integrationId": "uuid",
+  "provider": "jira",
+  "externalId": "10001",
+  "externalKey": "ABC-123",
+  "externalUrl": "https://jira.example.atlassian.net/browse/ABC-123",
+  "title": "[AutoTestAI] Login returns 500",
+  "syncStatus": "Synced",
+  "createdBy": "uuid",
+  "createdAt": "...",
+  "updatedAt": "...",
+  "alreadyExisted": false
+}
 ```
+
+Status response (safe — never secrets):
+
+```json
+{
+  "provider": "jira",
+  "configured": true,
+  "enabled": true,
+  "projectKey": "ABC",
+  "baseUrl": "https://jira.example.atlassian.net",
+  "issueType": "Bug"
+}
+```
+
+Upsert request (`settings.manage`; `apiToken` optional on update to retain
+the stored secret):
+
+```json
+{
+  "baseUrl": "https://jira.example.atlassian.net",
+  "projectKey": "ABC",
+  "email": "qa@example.com",
+  "apiToken": "secret-on-create-only",
+  "issueType": "Bug",
+  "priorityMapping": {"Critical": "Highest"},
+  "enabled": true
+}
+```
+
+Rules: create requires `tickets.create` + membership (admin bypass);
+status read requires `tickets.read`; upsert requires `settings.manage`
+(admin-only in the default role map). Cross-project defect paths return
+`403`. Missing/disabled/incomplete Jira configuration → `409`; duplicate
+success → idempotent `200` (`alreadyExisted: true`), never a second Jira
+issue (unique filtered index backs the check). Jira validation → `400`;
+Jira auth/permission → `502` (`JIRA_AUTH_FAILED`/`JIRA_FORBIDDEN`); rate
+limits → `429`; Jira unreachable/timeout → `503`/`502` without leaking
+provider bodies. Audit events `ticket.creation_requested/created/
+creation_failed` and `integration.jira_configured/updated` carry safe
+metadata only. Timeouts are ambiguous by nature — the failure message tells
+the operator to check Jira before retrying. Known limitations: manual
+creation only; no bidirectional sync, webhooks, polling, Azure DevOps, or
+automatic ticketing.
 
 ## 11. Integrations
 

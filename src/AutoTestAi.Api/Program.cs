@@ -35,6 +35,10 @@ builder.Services.Configure<AutoTestAi.Application.TestExecution.WorkerOptions>(
     builder.Configuration.GetSection(AutoTestAi.Application.TestExecution.WorkerOptions.SectionName));
 builder.Services.Configure<AutoTestAi.Application.AI.FailureAnalysisOptions>(
     builder.Configuration.GetSection(AutoTestAi.Application.AI.FailureAnalysisOptions.SectionName));
+builder.Services.Configure<AutoTestAi.Application.Tickets.TicketOptions>(
+    builder.Configuration.GetSection(AutoTestAi.Application.Tickets.TicketOptions.SectionName));
+builder.Services.Configure<AutoTestAi.Infrastructure.Jira.JiraOptions>(
+    builder.Configuration.GetSection(AutoTestAi.Infrastructure.Jira.JiraOptions.SectionName));
 builder.Services.Configure<ObservabilityOptions>(
     builder.Configuration.GetSection(ObservabilityOptions.SectionName));
 
@@ -214,6 +218,7 @@ app.MapTestGenerationEndpoints();
 app.MapExecutionEndpoints();
 app.MapFailureAnalysisEndpoints();
 app.MapDefectEndpoints();
+app.MapTicketEndpoints();
 app.MapHub<ExecutionHub>("/hubs/execution");
 
 if (!authOptions.Configured)

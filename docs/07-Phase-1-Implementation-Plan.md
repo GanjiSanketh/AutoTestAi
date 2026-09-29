@@ -31,8 +31,12 @@ Playwright TypeScript worker, Docker worker, Temporal workflow, execution creati
 ### Phase 6 — Failure Analysis + Bugs
 Failure classification, AI root-cause analysis, confidence/evidence, defect creation and bug views.
 
-### Phase 7 — Jira
-Integration configuration, connection test, manual ticket creation and external ticket reference.
+### Phase 7 — Jira (implemented, Slice 7)
+Project-scoped Jira configuration (admin, secret-safe), safe status
+endpoint, and manual ticket creation from internal defects with external
+key/URL reference. Idempotent per defect per integration; failure states
+are retryable. No automatic ticketing, AI ticketing, bidirectional sync,
+webhooks, polling, or Azure DevOps.
 
 ### Phase 8 — Dashboard + Reports
 KPI cards, execution trend, pass/fail, bug severity, recent execution, integration status and initial quality metrics.
