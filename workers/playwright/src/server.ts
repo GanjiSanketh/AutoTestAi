@@ -36,6 +36,7 @@ import type {
 
 interface AssignmentRecord {
   assignment: WorkerAssignment;
+  assignmentToken: string;
   status: AssignmentStatus;
   currentStepOrder: number | null;
   stepResults: WorkerStepResult[];
@@ -50,9 +51,22 @@ const MAX_LOGS = 2000;
 export function createWorkerServer(config: WorkerConfig): {
   listen: (port?: number) => Promise<void>;
   close: () => Promise<void>;
+  /** Active (queued/running) assignment count for grid heartbeats. */
+  activeAssignments: () => number;
+  /** Grid-directed drain: stop accepting new work, finish in-flight work. */
+  setDraining: (draining: boolean) => void;
 } {
   const assignments = new Map<string, AssignmentRecord>();
   let shuttingDown = false;
+  let draining = false;
+
+  function activeCount(): number {
+    let count = 0;
+    for (const record of assignments.values()) {
+      if (record.status === 'queued' || record.status === 'running') count += 1;
+    }
+    return count;
+  }
 
   function log(level: WorkerLog['level'], message: string): void {
     console.log(JSON.stringify({ level, msg: message, workerId: config.workerId }));
@@ -246,10 +260,14 @@ export function createWorkerServer(config: WorkerConfig): {
     void (async () => {
       const url = new URL(req.url ?? '/', 'http://localhost');
       if (req.method === 'GET' && url.pathname === '/health') {
-        sendJson(res, shuttingDown ? 503 : 200, {
-          status: shuttingDown ? 'draining' : 'healthy',
+        const drained = shuttingDown || draining;
+        sendJson(res, drained ? 503 : 200, {
+          status: drained ? 'draining' : 'healthy',
           workerId: config.workerId,
+          workerKey: config.workerKey,
           taskQueue: config.taskQueue,
+          capacity: config.capacity,
+          activeAssignments: activeCount(),
         });
         return;
       }
@@ -263,8 +281,12 @@ export function createWorkerServer(config: WorkerConfig): {
       }
 
       if (req.method === 'POST' && url.pathname === '/v1/assignments') {
-        if (shuttingDown) {
+        if (shuttingDown || draining) {
           sendJson(res, 503, { error: 'Worker is draining.' });
+          return;
+        }
+        if (activeCount() >= Math.max(1, config.capacity)) {
+          sendJson(res, 429, { error: 'Worker is at capacity.' });
           return;
         }
         let body: unknown;
@@ -280,12 +302,17 @@ export function createWorkerServer(config: WorkerConfig): {
           return;
         }
         const assignment = body as WorkerAssignment;
+        if (!assignment.assignmentToken) {
+          sendJson(res, 400, { error: 'Assignment token is required.' });
+          return;
+        }
         if (assignments.has(assignment.assignmentId)) {
           sendJson(res, 200, progressOf(assignments.get(assignment.assignmentId)!));
           return;
         }
         const record: AssignmentRecord = {
           assignment,
+          assignmentToken: assignment.assignmentToken,
           status: 'queued',
           currentStepOrder: null,
           stepResults: [],
@@ -344,5 +371,10 @@ export function createWorkerServer(config: WorkerConfig): {
         shuttingDown = true;
         server.close(() => resolve());
       }),
+    activeAssignments: () => activeCount(),
+    setDraining: (value: boolean) => {
+      draining = value;
+      if (value) log('info', 'grid directed drain: no new assignments accepted');
+    },
   };
 }

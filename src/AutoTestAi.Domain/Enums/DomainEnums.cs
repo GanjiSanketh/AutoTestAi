@@ -120,3 +120,34 @@ public enum IntegrationStatus
     Disabled = 1,
     Error = 2
 }
+
+/// <summary>
+/// Administrative worker lifecycle (Phase 2 Slice 9). Liveness states
+/// (Unhealthy/Offline) are derived from heartbeat freshness at read time;
+/// the stored value tracks the admin lifecycle only.
+/// </summary>
+public enum GridWorkerStatus
+{
+    Registered = 0,
+    Available = 1,
+    Busy = 2,
+    Draining = 3,
+    Unhealthy = 4,
+    Offline = 5,
+    Disabled = 6
+}
+
+/// <summary>
+/// Assignment lease lifecycle (Phase 2 Slice 9). Terminal states are final;
+/// a lease row is never reused for a new claim.
+/// </summary>
+public enum GridAssignmentStatus
+{
+    Pending = 0,
+    Claimed = 1,
+    Running = 2,
+    Completed = 3,
+    Released = 4,
+    Expired = 5,
+    Cancelled = 6
+}

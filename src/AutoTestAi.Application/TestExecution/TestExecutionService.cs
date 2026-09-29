@@ -2,6 +2,7 @@ using System.Text.Json;
 using AutoTestAi.Application.Audit;
 using AutoTestAi.Application.Authorization;
 using AutoTestAi.Application.Common;
+using AutoTestAi.Application.ExecutionGrid;
 using AutoTestAi.Application.Identity;
 using AutoTestAi.Application.Projects;
 using AutoTestAi.Application.Storage;
@@ -38,6 +39,8 @@ public sealed class TestExecutionService : ITestExecutionService
     private readonly IExecutionEventPublisher _events;
     private readonly IExecutionWorkflowCoordinator _workflows;
     private readonly IArtifactStorage _artifacts;
+    private readonly IGridLeaseManager? _leases;
+    private readonly IGridAssignmentStore? _gridAssignments;
 
     public TestExecutionService(
         IExecutionStore store,
@@ -50,7 +53,9 @@ public sealed class TestExecutionService : ITestExecutionService
         IAuditService audit,
         IExecutionEventPublisher events,
         IExecutionWorkflowCoordinator workflows,
-        IArtifactStorage artifacts)
+        IArtifactStorage artifacts,
+        IGridLeaseManager? leases = null,
+        IGridAssignmentStore? gridAssignments = null)
     {
         _store = store;
         _cases = cases;
@@ -63,6 +68,8 @@ public sealed class TestExecutionService : ITestExecutionService
         _events = events;
         _workflows = workflows;
         _artifacts = artifacts;
+        _leases = leases;
+        _gridAssignments = gridAssignments;
     }
 
     public async Task<StartExecutionResultDto> StartAsync(
@@ -266,6 +273,12 @@ public sealed class TestExecutionService : ITestExecutionService
             test.Status = ExecutionTestStatus.Cancelled;
             test.UpdatedAt = now;
             await _store.SaveChangesAsync(cancellationToken);
+            if (_leases is not null)
+            {
+                var activeAssignment = await _gridAssignments.FindActiveByTestAsync(test.Id, cancellationToken);
+                if (activeAssignment is not null)
+                    await _leases.ReleaseAssignmentAsync(test.Id, activeAssignment.Id, activeAssignment.AssignmentToken, test.Status.ToString(), cancellationToken);
+            }
             await _audit.RecordAsync("execution.cancelled", "execution",
                 execution.Id.ToString(), execution.ProjectId,
                 SafeMetadata(execution, test.TestCaseId, test.TestCaseVersionId, "cancelled-before-start"),
@@ -385,6 +398,21 @@ public sealed class TestExecutionService : ITestExecutionService
             version = await _cases.GetVersionByIdAsync(test.TestCaseVersionId.Value, ct);
         var steps = (await _store.ListStepResultsAsync(test.Id, ct))
             .OrderBy(s => s.StepOrder).Select(MapStep).ToList();
+        Guid? workerId = null;
+        string? assignmentStatus = null;
+        if (_gridAssignments is not null)
+        {
+            try
+            {
+                var lease = await _gridAssignments.FindActiveByTestAsync(test.Id, ct);
+                workerId = lease?.WorkerId;
+                assignmentStatus = lease?.Status.ToString();
+            }
+            catch
+            {
+                // Grid enrichment is supplementary; detail always wins.
+            }
+        }
         return new ExecutionDetailDto(
             execution.Id, execution.ProjectId,
             execution.Status.ToString(), execution.TriggerType.ToString(),
@@ -402,7 +430,8 @@ public sealed class TestExecutionService : ITestExecutionService
                 test.Status.ToString(), test.Framework, test.Browser,
                 test.FailureClassification.ToString(), test.Attempt,
                 test.DurationMs, test.ErrorType, test.ErrorMessage,
-                steps, test.CreatedAt, test.UpdatedAt));
+                steps, test.CreatedAt, test.UpdatedAt),
+            workerId, assignmentStatus);
     }
 
     private static ExecutionStepDto MapStep(ExecutionStepResult row) => new(

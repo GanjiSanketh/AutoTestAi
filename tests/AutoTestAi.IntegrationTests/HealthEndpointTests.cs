@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using AutoTestAi.IntegrationTests;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace AutoTestAi.IntegrationTests;
@@ -8,13 +9,13 @@ namespace AutoTestAi.IntegrationTests;
 /// Proves the API starts with NO external dependencies configured
 /// and serves the Phase-0 health surface.
 /// </summary>
-public sealed class HealthEndpointTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class HealthEndpointTests : IClassFixture<Slice1ApiFactory>
 {
     private readonly HttpClient _client;
 
-    public HealthEndpointTests(WebApplicationFactory<Program> factory)
+    public HealthEndpointTests(Slice1ApiFactory factory)
     {
-        _client = factory.WithWebHostBuilder(_ => { }).CreateClient();
+        _client = factory.CreateClient();
     }
 
     [Fact]

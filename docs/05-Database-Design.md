@@ -84,16 +84,26 @@ users/projects → audit_events
 ### integrations
 `id UUID PK`, `project_id`, `provider`, `integration_type`, `configuration JSONB`, `secret_reference`, `status`, timestamps. Slice 7 Jira shape: `configuration = {baseUrl, projectKey, email, issueType, priorityMapping, appBaseUrl?}` (no secrets — the API token lives in `secret_reference` server-side only); unique filtered `(project_id,provider) WHERE project_id IS NOT NULL` (one Jira row per project).
 
+### grid_workers (Slice 9)
+`id UUID PK`, `worker_key VARCHAR(100) UNIQUE`, `display_name`, `worker_type`, `framework`, `browsers text[]`, `version`, `status`, `capacity`, `active_assignment_count`, `last_heartbeat_at`, `credential_hash`, `credential_salt`, `base_url`, `row_version` (concurrency token), `created_at`, `updated_at`. Index on `status`, `last_heartbeat_at`; unique on `worker_key`.
+
+### grid_assignments (Slice 9)
+`id UUID PK`, `execution_id`, `execution_test_id`, `worker_id`, `status` (Pending/Claimed/Running/Completed/Released/Expired/Cancelled), `attempt`, `acquired_at`, `expires_at`, `last_renewed_at`, `worker_assignment_ref`, `created_at`, `updated_at`. Index on `execution_id`, `execution_test_id`, `worker_id`, `status`, `expires_at`; unique filtered `(execution_test_id) WHERE status IN ('Claimed','Running')` (one active lease per execution test).
+
 ### audit_events
 `id BIGSERIAL PK`, `actor_user_id`, `action`, `entity_type`, `entity_id`, `project_id`, `ip_address`, `user_agent`, `metadata JSONB`, `created_at`.
 
 ## 4. Important Indexes
 
-Index project membership, project/test status, test versions, execution project/status, execution-test status, execution-log `(execution_test_id,timestamp)`, defects `(project_id,status)`, tickets `(project_id,sync_status)`, and audit `(project_id,created_at)`.
+Index project membership, project/test status, test versions, execution project/status, execution-test status, execution-log `(execution_test_id,timestamp)`, defects `(project_id,status)`, tickets `(project_id,sync_status)`, grid_workers `(status)`, `grid_workers (last_heartbeat_at)`, `grid_assignments (execution_test_id)` filtered unique, `grid_assignments (worker_id, expires_at)`, and audit `(project_id,created_at)`.
 
 Slice 8 reporting adds no tables and no indexes: dashboard/report
 aggregates reuse these source-of-truth tables and existing indexes with
 bounded UTC date ranges (default 30 days, max 365).
+
+Slice 9 grid uses the tables above; queries are bounded by validated
+UTC date ranges (default 30 days, max 365). Concurrency is enforced by
+unique filtered indexes and optimistic concurrency tokens (`row_version`).
 
 ## 5. JSONB
 

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using AutoTestAi.Application.Audit;
 using AutoTestAi.Application.Common;
+using AutoTestAi.Application.ExecutionGrid;
 using AutoTestAi.Application.Storage;
 using AutoTestAi.Application.TestCases;
 using AutoTestAi.Application.TestGeneration;
@@ -22,7 +23,8 @@ public sealed record PreparedExecution(
     Guid ExecutionTestId,
     bool CanRun,
     string? SkipReason,
-    WorkerAssignmentDto? Assignment);
+    WorkerAssignmentDto? Assignment,
+    Guid? AssignmentToken);
 
 /// <summary>Normalized worker outcome (functional results are returned, never thrown).</summary>
 public sealed record WorkerExecutionOutcome(
@@ -65,6 +67,8 @@ public sealed class ExecutionEngine : IExecutionEngine
     private readonly IOptions<ExecutionOptions> _options;
     private readonly IDateTimeProvider _clock;
     private readonly IAuditService _audit;
+    private readonly IGridLeaseManager? _leases;
+    private readonly IGridAssignmentStore? _assignments;
     private readonly ILogger<ExecutionEngine> _logger;
 
     public ExecutionEngine(
@@ -76,7 +80,9 @@ public sealed class ExecutionEngine : IExecutionEngine
         IOptions<ExecutionOptions> options,
         IDateTimeProvider clock,
         IAuditService audit,
-        ILogger<ExecutionEngine> logger)
+        ILogger<ExecutionEngine> logger,
+        IGridLeaseManager? leases = null,
+        IGridAssignmentStore? assignments = null)
     {
         _store = store;
         _cases = cases;
@@ -86,6 +92,8 @@ public sealed class ExecutionEngine : IExecutionEngine
         _options = options;
         _clock = clock;
         _audit = audit;
+        _leases = leases;
+        _assignments = assignments;
         _logger = logger;
     }
 
@@ -95,9 +103,9 @@ public sealed class ExecutionEngine : IExecutionEngine
     {
         var (execution, test) = await LoadAsync(executionId, ct);
         if (ExecutionTransitions.IsTestTerminal(test.Status))
-            return new PreparedExecution(executionId, test.Id, false, $"already {test.Status}", null);
+            return new PreparedExecution(executionId, test.Id, false, $"already {test.Status}", null, null);
         if (test.Status != ExecutionTestStatus.Queued)
-            return new PreparedExecution(executionId, test.Id, false, $"unexpected status {test.Status}", null);
+            return new PreparedExecution(executionId, test.Id, false, $"unexpected status {test.Status}", null, null);
 
         // Re-validate the exact bound version (fail-safe if it vanished or left Approved).
         var version = test.TestCaseVersionId is not null
@@ -108,13 +116,13 @@ public sealed class ExecutionEngine : IExecutionEngine
         {
             await FailSafeAsync(execution, test,
                 "The bound test case version is no longer available.", ct);
-            return new PreparedExecution(executionId, test.Id, false, "version unavailable", null);
+            return new PreparedExecution(executionId, test.Id, false, "version unavailable", null, null);
         }
         if (version.ReviewStatus != ReviewStatus.Approved)
         {
             await FailSafeAsync(execution, test,
                 $"Version {version.VersionNumber} is no longer Approved (now {version.ReviewStatus}).", ct);
-            return new PreparedExecution(executionId, test.Id, false, "version not approved", null);
+            return new PreparedExecution(executionId, test.Id, false, "version not approved", null, null);
         }
 
         var now = _clock.UtcNow;
@@ -123,6 +131,11 @@ public sealed class ExecutionEngine : IExecutionEngine
         execution.Status = ExecutionStatus.Running;
         execution.StartedAt = now;
         execution.UpdatedAt = now;
+        // Capture the assignment ID that started this execution for fencing
+        if (test.AssignmentId != test.StartedAssignmentId)
+        {
+            test.StartedAssignmentId = test.AssignmentId;
+        }
         await _store.SaveChangesAsync(ct);
 
         await _audit.RecordAsync("execution.started", "execution",
@@ -135,7 +148,7 @@ public sealed class ExecutionEngine : IExecutionEngine
             new { executionId = execution.Id, executionTestId = test.Id, attempt = test.Attempt }, ct);
 
         return new PreparedExecution(executionId, test.Id, true, null,
-            BuildAssignment(execution, test, testCase, version));
+            BuildAssignment(execution, test, testCase, version), null);
     }
 
     // ---------- run ----------
@@ -294,6 +307,19 @@ public sealed class ExecutionEngine : IExecutionEngine
         if (ExecutionTransitions.IsTestTerminal(test.Status))
             return; // idempotent: exactly one terminal state wins
 
+        // Fencing: verify the active assignment ID matches the test's started assignment ID
+        // to prevent stale workers from persisting results after their lease expired.
+        if (_assignments is not null)
+        {
+            var activeAssignment = await _assignments.FindActiveByTestAsync(test.Id, ct);
+            if (activeAssignment is not null && test.StartedAssignmentId != activeAssignment.Id)
+            {
+                _logger.LogWarning("Stale completion rejected for execution test {TestId}: assignment ID mismatch (expected {Expected}, got {Actual}).",
+                    test.Id, test.StartedAssignmentId, activeAssignment.Id);
+                throw new ConflictException($"Stale completion rejected for execution test {test.Id}: assignment ID mismatch.");
+            }
+        }
+
         var now = _clock.UtcNow;
         await _store.AddStepResultsAsync(outcome.Steps.Select(s => new ExecutionStepResult
         {
@@ -332,6 +358,12 @@ public sealed class ExecutionEngine : IExecutionEngine
         execution.CompletedAt = now;
         execution.UpdatedAt = now;
         await _store.SaveChangesAsync(ct);
+        if (_leases is not null)
+        {
+            var activeAssignment = await _assignments.FindActiveByTestAsync(test.Id, ct);
+            if (activeAssignment is not null)
+                await _leases.ReleaseAssignmentAsync(test.Id, activeAssignment.Id, activeAssignment.AssignmentToken, test.Status.ToString(), ct);
+        }
 
         await _events.PublishAsync(execution.Id, ExecutionEvents.ExecutionTestCompleted,
             new
@@ -394,6 +426,19 @@ public sealed class ExecutionEngine : IExecutionEngine
         if (ExecutionTransitions.IsTestTerminal(test.Status))
             return;
 
+        // Fencing: verify the active assignment ID matches the test's started assignment ID
+        // to prevent stale workers from finalizing executions after their lease expired.
+        if (_assignments is not null)
+        {
+            var activeAssignment = await _assignments.FindActiveByTestAsync(test.Id, ct);
+            if (activeAssignment is not null && test.StartedAssignmentId != activeAssignment.Id)
+            {
+                _logger.LogWarning("Stale finalization rejected for execution test {TestId}: assignment ID mismatch (expected {Expected}, got {Actual}).",
+                    test.Id, test.StartedAssignmentId, activeAssignment.Id);
+                throw new ConflictException($"Stale finalization rejected for execution test {test.Id}: assignment ID mismatch.");
+            }
+        }
+
         var now = _clock.UtcNow;
         if (ExecutionTransitions.IsValidTestTransition(test.Status, testStatus))
         {
@@ -419,6 +464,12 @@ public sealed class ExecutionEngine : IExecutionEngine
             },
         }, ct);
         await _store.SaveChangesAsync(ct);
+        if (_leases is not null)
+        {
+            var activeAssignment = await _assignments.FindActiveByTestAsync(test.Id, ct);
+            if (activeAssignment is not null)
+                await _leases.ReleaseAssignmentAsync(test.Id, activeAssignment.Id, activeAssignment.AssignmentToken, test.Status.ToString(), ct);
+        }
 
         await PublishStatusAsync(execution, ct);
         await _events.PublishAsync(execution.Id,
@@ -455,7 +506,12 @@ public sealed class ExecutionEngine : IExecutionEngine
         execution.CompletedAt = now;
         execution.UpdatedAt = now;
         await _store.SaveChangesAsync(ct);
-        await PublishStatusAsync(execution, ct);
+        if (_leases is not null)
+        {
+            var activeAssignment = await _assignments.FindActiveByTestAsync(test.Id, ct);
+            if (activeAssignment is not null)
+                await _leases.ReleaseAssignmentAsync(test.Id, activeAssignment.Id, activeAssignment.AssignmentToken, test.Status.ToString(), ct);
+        }
         await _events.PublishAsync(execution.Id, ExecutionEvents.ExecutionFailed,
             new { executionId = execution.Id, status = execution.Status.ToString(), reason }, ct);
         await _audit.RecordAsync("execution.failed", "execution",
@@ -500,7 +556,8 @@ public sealed class ExecutionEngine : IExecutionEngine
             string.IsNullOrWhiteSpace(test.Framework) ? "playwright" : test.Framework!,
             string.IsNullOrWhiteSpace(test.Browser) ? "chromium" : test.Browser!,
             targetUrl, workerSteps, timeouts,
-            ScreenshotOnFailure: true, ScreenshotOnFinish: false);
+            ScreenshotOnFailure: true, ScreenshotOnFinish: false,
+            test.AssignmentToken ?? Guid.Empty);
     }
 
     private async Task PersistScreenshotsAsync(

@@ -50,9 +50,26 @@ public sealed class ExecutionTest : EntityBase
     public long? DurationMs { get; set; }
     public string? ErrorType { get; set; }
     public string? ErrorMessage { get; set; }
-}
+
+    /// <summary>
+    /// Assignment token for the current active lease (Phase 2 Slice 9).
+    /// Used to fence stale worker completions after lease expiry/requeue.
+    /// </summary>
+    public Guid? AssignmentToken { get; set; }
+
+    /// <summary>
+    /// Assignment ID for the lease that started this execution (Phase 2 Slice 9).
+    /// Used to fence stale worker completions after lease expiry/requeue.
+    /// </summary>
+    public Guid? AssignmentId { get; set; }
 
 /// <summary>
+    /// Assignment ID that started this execution (Phase 2 Slice 9).
+    /// Captured when the test transitions to Running; never changes after that.
+    /// Used to fence stale worker completions after lease expiry/requeue.
+    /// </summary>
+    public Guid? StartedAssignmentId { get; set; }
+}
 /// Persisted per-step outcome (Slice 5 §16). Step values are stored redacted:
 /// password-like targets never persist plaintext.
 /// </summary>

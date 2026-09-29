@@ -45,6 +45,16 @@ recent executions/defects/tickets, audit activity feed) and paginated
 execution/defect/ticket reports with server-side filtering. Descriptive
 metrics only: no prediction, AI analytics, exports, or real-time engine.
 
+## Phase 2 — Scalable Execution
+
+### Phase 2 — Slice 9: Distributed Parallel Execution Grid (implemented, Slice 9)
+Project-scoped execution grid with worker registration, heartbeat,
+capacity-based scheduling, assignment leases, lease renewal/expiry,
+stale worker detection, draining/disabling, deterministic scheduling.
+Playwright workers enforce local capacity; API enforces global/project
+concurrency ceilings. Temporal remains orchestration authority.
+No auto-ticketing, self-healing, AI scheduling, or Phase 2+ features.
+
 ## 3. Definition of Done
 
 A feature is complete only when its backend endpoint, authorization, validation, migration, frontend integration, loading/empty/error states, tests, OpenAPI update and security/audit considerations are present. No production-looking hardcoded data remains.

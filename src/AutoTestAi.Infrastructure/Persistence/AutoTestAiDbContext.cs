@@ -33,6 +33,8 @@ public sealed class AutoTestAiDbContext : DbContext
     public DbSet<ExecutionLog> ExecutionLogs => Set<ExecutionLog>();
     public DbSet<ExecutionArtifact> ExecutionArtifacts => Set<ExecutionArtifact>();
     public DbSet<FailureAnalysis> FailureAnalyses => Set<FailureAnalysis>();
+    public DbSet<GridWorker> GridWorkers => Set<GridWorker>();
+    public DbSet<GridAssignment> GridAssignments => Set<GridAssignment>();
     public DbSet<Defect> Defects => Set<Defect>();
     public DbSet<Ticket> Tickets => Set<Ticket>();
     public DbSet<Integration> Integrations => Set<Integration>();
@@ -124,6 +126,35 @@ public sealed class AutoTestAiDbContext : DbContext
         modelBuilder.Entity<FailureAnalysis>().Property(f => f.PromptVersion).HasMaxLength(100);
         modelBuilder.Entity<FailureAnalysis>().Property(f => f.Model).HasMaxLength(200);
         modelBuilder.Entity<FailureAnalysis>().Property(f => f.Provider).HasMaxLength(100);
+
+        // --- execution grid (Phase 2 Slice 9) ---
+        modelBuilder.Entity<GridWorker>().ToTable("grid_workers");
+        modelBuilder.Entity<GridWorker>().HasIndex(w => w.WorkerKey).IsUnique();
+        modelBuilder.Entity<GridWorker>().HasIndex(w => w.Status);
+        modelBuilder.Entity<GridWorker>().HasIndex(w => w.LastHeartbeatAt);
+        modelBuilder.Entity<GridWorker>().Property(w => w.WorkerKey).HasMaxLength(100);
+        modelBuilder.Entity<GridWorker>().Property(w => w.DisplayName).HasMaxLength(200);
+        modelBuilder.Entity<GridWorker>().Property(w => w.WorkerType).HasMaxLength(50);
+        modelBuilder.Entity<GridWorker>().Property(w => w.Framework).HasMaxLength(50);
+        modelBuilder.Entity<GridWorker>().Property(w => w.Version).HasMaxLength(50);
+        modelBuilder.Entity<GridWorker>().Property(w => w.Status).HasConversion<string>();
+        modelBuilder.Entity<GridWorker>().Property(w => w.BaseUrl).HasMaxLength(500);
+        modelBuilder.Entity<GridWorker>().Property(w => w.CredentialHash).HasMaxLength(128);
+        modelBuilder.Entity<GridWorker>().Property(w => w.CredentialSalt).HasMaxLength(64);
+        modelBuilder.Entity<GridWorker>().Property(w => w.RowVersion).IsConcurrencyToken();
+        modelBuilder.Entity<GridAssignment>().ToTable("grid_assignments");
+        modelBuilder.Entity<GridAssignment>().HasIndex(a => a.ExecutionId);
+        modelBuilder.Entity<GridAssignment>().HasIndex(a => a.ExecutionTestId);
+        modelBuilder.Entity<GridAssignment>().HasIndex(a => a.WorkerId);
+        modelBuilder.Entity<GridAssignment>().HasIndex(a => a.Status);
+        modelBuilder.Entity<GridAssignment>().HasIndex(a => a.ExpiresAt);
+        // One active lease per execution test: concurrent claims collide here.
+        modelBuilder.Entity<GridAssignment>()
+            .HasIndex(a => a.ExecutionTestId)
+            .IsUnique()
+            .HasFilter("\"Status\" IN ('Claimed', 'Running')");
+        modelBuilder.Entity<GridAssignment>().Property(a => a.Status).HasConversion<string>();
+        modelBuilder.Entity<GridAssignment>().Property(a => a.WorkerAssignmentRef).HasMaxLength(64);
 
         // --- defects / tickets / integrations ---
         modelBuilder.Entity<Defect>().ToTable("defects");

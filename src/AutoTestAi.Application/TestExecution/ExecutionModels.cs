@@ -92,7 +92,9 @@ public sealed record ExecutionDetailDto(
     DateTimeOffset? CompletedAt,
     Guid? CreatedBy,
     DateTimeOffset CreatedAt,
-    ExecutionTestDetailDto Test);
+    ExecutionTestDetailDto Test,
+    Guid? WorkerId = null,
+    string? AssignmentStatus = null);
 
 public sealed record StartExecutionResultDto(
     Guid ExecutionId,

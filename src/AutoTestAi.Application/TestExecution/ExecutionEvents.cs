@@ -16,4 +16,10 @@ public static class ExecutionEvents
     public const string FailureAnalysisCompleted = "FailureAnalysisCompleted";
     public const string ExecutionCompleted = "ExecutionCompleted";
     public const string ExecutionFailed = "ExecutionFailed";
+    /// <summary>Phase 2 Slice 9: execution is waiting for grid capacity.</summary>
+    public const string ExecutionQueued = "ExecutionQueued";
+    /// <summary>Phase 2 Slice 9: a grid lease was claimed on a worker.</summary>
+    public const string ExecutionAssigned = "ExecutionAssigned";
+    /// <summary>Phase 2 Slice 9: worker lifecycle/health changed.</summary>
+    public const string WorkerStatusChanged = "WorkerStatusChanged";
 }

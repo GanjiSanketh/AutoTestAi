@@ -25,6 +25,7 @@
 | Defect management | `defects` (Slice 6: explicit human creation from failed executions, server-derived relationships, validated status lifecycle, audited changes, list/detail UI; no external tickets yet) |
 | Jira | tickets + integrations (Slice 7: manual `POST …/defects/{id}/ticket` via `TicketService` → `IJiraTicketProvider` → Infrastructure Jira adapter; project Jira config via `PUT …/integrations/jira` with secret-safe status; idempotent per defect per integration; no auto-ticketing, sync, or webhooks) |
 | Quality dashboard | dashboard + reports API + ECharts (Slice 8: project-scoped read-only `IDashboardService`/`IReportService` over EF aggregates; summary/trend/failure-breakdown/defect/ticket overviews; paginated execution/defect/ticket reports; pass rate = Passed ÷ terminal, null when empty; deterministic classification authoritative; ticket metrics from internal records, never Jira; no prediction, AI analytics, or exports) |
+| Execution grid | grid_workers + grid_assignments (Slice 9: project-scoped read/write `IExecutionGridService`/`IGridScheduler` over EF aggregates; worker registration/heartbeat, capacity leases, lease renewal/expiry, stale worker reaping; deterministic least-loaded scheduling with capability matching; atomic claim via unique filtered index; global/project concurrency ceilings; no auto-scaling, AI scheduling, self-healing, or Phase 2+ features) |
 | Audit | audit_events |
 
 ## 3. NFR Traceability

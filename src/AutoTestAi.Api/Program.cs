@@ -33,6 +33,8 @@ builder.Services.Configure<AutoTestAi.Application.TestExecution.ExecutionOptions
     builder.Configuration.GetSection(AutoTestAi.Application.TestExecution.ExecutionOptions.SectionName));
 builder.Services.Configure<AutoTestAi.Application.TestExecution.WorkerOptions>(
     builder.Configuration.GetSection(AutoTestAi.Application.TestExecution.WorkerOptions.SectionName));
+builder.Services.Configure<AutoTestAi.Application.ExecutionGrid.GridOptions>(
+    builder.Configuration.GetSection(AutoTestAi.Application.ExecutionGrid.GridOptions.SectionName));
 builder.Services.Configure<AutoTestAi.Application.AI.FailureAnalysisOptions>(
     builder.Configuration.GetSection(AutoTestAi.Application.AI.FailureAnalysisOptions.SectionName));
 builder.Services.Configure<AutoTestAi.Application.Tickets.TicketOptions>(
@@ -220,6 +222,7 @@ app.MapFailureAnalysisEndpoints();
 app.MapDefectEndpoints();
 app.MapTicketEndpoints();
 app.MapDashboardEndpoints();
+app.MapExecutionGridEndpoints();
 app.MapHub<ExecutionHub>("/hubs/execution");
 
 if (!authOptions.Configured)

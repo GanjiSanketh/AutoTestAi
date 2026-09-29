@@ -16,7 +16,8 @@ public sealed record WorkerAssignmentDto(
     IReadOnlyList<WorkerStepDto> Steps,
     WorkerTimeoutsDto Timeouts,
     bool ScreenshotOnFailure,
-    bool ScreenshotOnFinish);
+    bool ScreenshotOnFinish,
+    Guid AssignmentToken);
 
 public sealed record WorkerStepResultDto(
     int Order,

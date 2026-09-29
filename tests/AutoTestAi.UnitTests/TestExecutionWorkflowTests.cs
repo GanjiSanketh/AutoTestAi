@@ -32,7 +32,7 @@ public sealed class TestExecutionWorkflowTests
         {
             Calls.Add("prepare");
             return Task.FromResult(PrepareHandler?.Invoke(executionId)
-                ?? new PreparedExecution(executionId, Guid.NewGuid(), false, "default", null));
+                ?? new PreparedExecution(executionId, Guid.NewGuid(), false, "default", null, null));
         }
 
         public Task<WorkerExecutionOutcome> RunWorkerAsync(Guid executionId, Func<Task>? heartbeatAsync, CancellationToken ct)
@@ -128,7 +128,7 @@ public sealed class TestExecutionWorkflowTests
         var executionId = Guid.NewGuid();
         var engine = new FakeEngine
         {
-            PrepareHandler = id => new PreparedExecution(id, Guid.NewGuid(), true, null, null),
+            PrepareHandler = id => new PreparedExecution(id, Guid.NewGuid(), true, null, null, null),
             RunHandler = (_, _) => Task.FromResult(Outcome(ExecutionTestStatus.Passed)),
         };
         await using var services = BuildProvider(engine);
@@ -150,7 +150,7 @@ public sealed class TestExecutionWorkflowTests
         var runs = 0;
         var engine = new FakeEngine
         {
-            PrepareHandler = id => new PreparedExecution(id, Guid.NewGuid(), true, null, null),
+            PrepareHandler = id => new PreparedExecution(id, Guid.NewGuid(), true, null, null, null),
             RunHandler = (_, _) =>
             {
                 runs++;
@@ -175,7 +175,7 @@ public sealed class TestExecutionWorkflowTests
         var executionId = Guid.NewGuid();
         var engine = new FakeEngine
         {
-            PrepareHandler = id => new PreparedExecution(id, Guid.NewGuid(), false, "cancelled", null),
+            PrepareHandler = id => new PreparedExecution(id, Guid.NewGuid(), false, "cancelled", null, null),
         };
         await using var services = BuildProvider(engine);
 
@@ -195,7 +195,7 @@ public sealed class TestExecutionWorkflowTests
         var enteredRun = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var engine = new FakeEngine
         {
-            PrepareHandler = id => new PreparedExecution(id, Guid.NewGuid(), true, null, null),
+            PrepareHandler = id => new PreparedExecution(id, Guid.NewGuid(), true, null, null, null),
             RunHandler = (_, _) => throw new InvalidOperationException("must not run"),
         };
         await using var services = BuildProvider(engine);

@@ -32,14 +32,13 @@ public sealed class PlaywrightWorkerClientTests
 
     private static PlaywrightWorkerClient Create(
         FakeHttpHandler handler, WorkerOptions? options = null)
-        => new(new FakeFactory(new HttpClient(handler)),
-            Options.Create(options ?? new WorkerOptions { BaseUrl = "http://worker:8090", ApiToken = "tok" }),
-            NullLogger<PlaywrightWorkerClient>.Instance);
+        => new(new WorkerHttpTransport(new FakeFactory(new HttpClient(handler))),
+            Options.Create(options ?? new WorkerOptions { BaseUrl = "http://worker:8090", ApiToken = "tok" }));
 
     private static WorkerAssignmentDto Assignment() => new(
         "assign1", "exec1", "playwright", "chromium", "https://example.test",
         new[] { new WorkerStepDto(1, "navigate", "https://example.test", null) },
-        new WorkerTimeoutsDto(60000, 10000), true, false);
+        new WorkerTimeoutsDto(60000, 10000), true, false, Guid.NewGuid());
 
     [Fact]
     public async Task Start_SendsBearerToken_AndReturnsAssignmentId()

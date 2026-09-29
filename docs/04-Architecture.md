@@ -156,6 +156,30 @@ when nothing is terminal. Failure charts use the deterministic
 metrics. Ticket metrics come from internal `Ticket` records — rendering
 never contacts Jira, so dashboard availability never depends on it.
 
+Slice-9 distributed parallel execution grid (Phase 2):
+
+```text
+React Grid UI / Admin API
+      ↓
+ASP.NET Core Execution Grid Service
+      ↓
+Temporal → Grid Scheduler (capacity/lease) → WorkerHttpTransport
+      ↓
+Playwright Worker Pool (capacity-constrained, lease-based)
+```
+
+The grid service manages worker registration, heartbeat, capacity, and
+assignment leases. Workers register with a provisioning token, receive a
+credential, and heartbeat to advertise availability. The scheduler uses
+a least-loaded deterministic algorithm with capability matching to claim
+leases atomically (unique filtered index on ExecutionTestId + Status).
+Leases are renewed while work is active; expired leases are reaped and
+executions re-queued. Workers enforce local capacity; the API enforces
+global/project concurrency ceilings. Temporal remains the sole workflow
+orchestrator; no second scheduler is introduced. Cancellation, timeout,
+and retry semantics from Slice 5 are preserved.
+```
+
 ## 6. AI Provider Abstraction
 
 Business modules depend on an internal abstraction, not vendor SDKs.

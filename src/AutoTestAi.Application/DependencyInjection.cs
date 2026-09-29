@@ -41,6 +41,9 @@ public static class DependencyInjection
         services.AddScoped<Tickets.IJiraIntegrationService, Tickets.JiraIntegrationService>();
         services.AddScoped<Reports.IDashboardService, Reports.DashboardService>();
         services.AddScoped<Reports.IReportService, Reports.ReportService>();
+        services.AddScoped<ExecutionGrid.IExecutionGridService, ExecutionGrid.ExecutionGridService>();
+        services.AddScoped<ExecutionGrid.IGridScheduler, ExecutionGrid.GridScheduler>();
+        services.AddScoped<ExecutionGrid.IGridLeaseManager, ExecutionGrid.GridLeaseManager>();
         services.AddScoped<IAiTestGenerator, TestGenerationService>();
         services.AddScoped<IAuditService, AuditService>();
         return services;

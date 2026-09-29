@@ -27,6 +27,7 @@ export interface WorkerAssignment {
   timeouts: WorkerTimeouts;
   screenshotOnFailure: boolean;
   screenshotOnFinish: boolean;
+  assignmentToken: string;
 }
 
 export type WorkerStepStatus = 'passed' | 'failed' | 'skipped' | 'error';

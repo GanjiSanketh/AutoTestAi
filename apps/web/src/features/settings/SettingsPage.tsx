@@ -1,10 +1,5 @@
-import { PlaceholderPage } from '../../components/common/PlaceholderPage';
+import { ExecutionGridSettings } from './ExecutionGridSettings';
 
 export function SettingsPage() {
-  return (
-    <PlaceholderPage
-      title="Settings"
-      description="Profile, workspace, users/roles, integrations, AI providers, execution and secrets (Phase 1)."
-    />
-  );
+  return <ExecutionGridSettings />;
 }

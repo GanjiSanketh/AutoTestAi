@@ -48,6 +48,8 @@ public static class DependencyInjection
             services.AddScoped<Application.Tickets.ITicketStore, Tickets.EfTicketStore>();
             services.AddScoped<Application.Tickets.IIntegrationStore, Tickets.EfIntegrationStore>();
             services.AddScoped<Application.Reports.IReportQueryStore, Reports.EfReportQueryStore>();
+            services.AddScoped<Application.ExecutionGrid.IGridWorkerStore, ExecutionGrid.EfGridWorkerStore>();
+            services.AddScoped<Application.ExecutionGrid.IGridAssignmentStore, ExecutionGrid.EfGridAssignmentStore>();
         }
         else
         {
@@ -63,6 +65,8 @@ public static class DependencyInjection
             services.AddSingleton<Application.Tickets.ITicketStore, Tickets.UnavailableTicketStore>();
             services.AddSingleton<Application.Tickets.IIntegrationStore, Tickets.UnavailableIntegrationStore>();
             services.AddSingleton<Application.Reports.IReportQueryStore, Reports.UnavailableReportQueryStore>();
+            services.AddSingleton<Application.ExecutionGrid.IGridWorkerStore, ExecutionGrid.UnavailableGridWorkerStore>();
+            services.AddSingleton<Application.ExecutionGrid.IGridAssignmentStore, ExecutionGrid.UnavailableGridAssignmentStore>();
         }
 
         // Dapper remains referenced for future read-model queries (docs/04);
@@ -79,8 +83,12 @@ public static class DependencyInjection
         services.AddTransient<IAiProvider, OpenAiAiProvider>();
 
         // Playwright execution plane (Slice 5 §36): HTTP boundary, token server-side.
+        // Phase 2 Slice 9: per-worker transport plus the grid dispatch
+        // decorator. The legacy single-worker client remains for fallback.
         services.AddHttpClient("playwright-worker");
-        services.AddTransient<IPlaywrightWorkerClient, Executions.PlaywrightWorkerClient>();
+        services.AddTransient<Executions.WorkerHttpTransport>();
+        services.AddTransient<Executions.PlaywrightWorkerClient>();
+        services.AddTransient<IPlaywrightWorkerClient, ExecutionGrid.GridPlaywrightWorkerClient>();
 
         // Slice 7: Jira ticketing boundary (manual creation only; token server-side).
         services.AddHttpClient(Jira.JiraTicketProvider.HttpClientName);
