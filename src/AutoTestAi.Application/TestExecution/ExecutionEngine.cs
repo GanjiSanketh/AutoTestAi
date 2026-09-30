@@ -5,8 +5,10 @@ using AutoTestAi.Application.Audit;
 using AutoTestAi.Application.Common;
 using AutoTestAi.Application.ExecutionGrid;
 using AutoTestAi.Application.SelfHealing;
+using AutoTestAi.Application.Secrets;
 using AutoTestAi.Application.Storage;
 using AutoTestAi.Application.TestCases;
+using AutoTestAi.Application.Variables;
 using AutoTestAi.Application.TestGeneration;
 using AutoTestAi.Domain.Entities;
 using AutoTestAi.Domain.Enums;
@@ -73,6 +75,8 @@ public sealed class ExecutionEngine : IExecutionEngine
     private readonly IGridAssignmentStore? _assignments;
     private readonly ISelfHealingPolicyStore? _healingPolicies;
     private readonly ISelfHealingService? _healing;
+    private readonly IVariableResolutionService? _varResolver;
+    private readonly IExecutionVariablesStore? _envelopes;
     private readonly ILogger<ExecutionEngine> _logger;
 
     public ExecutionEngine(
@@ -88,7 +92,9 @@ public sealed class ExecutionEngine : IExecutionEngine
         IGridLeaseManager? leases = null,
         IGridAssignmentStore? assignments = null,
         ISelfHealingPolicyStore? healingPolicies = null,
-        ISelfHealingService? healing = null)
+        ISelfHealingService? healing = null,
+        IVariableResolutionService? varResolver = null,
+        IExecutionVariablesStore? envelopes = null)
     {
         _store = store;
         _cases = cases;
@@ -102,6 +108,8 @@ public sealed class ExecutionEngine : IExecutionEngine
         _assignments = assignments;
         _healingPolicies = healingPolicies;
         _healing = healing;
+        _varResolver = varResolver;
+        _envelopes = envelopes;
         _logger = logger;
     }
 
@@ -155,8 +163,12 @@ public sealed class ExecutionEngine : IExecutionEngine
         await _events.PublishAsync(execution.Id, ExecutionEvents.ExecutionTestStarted,
             new { executionId = execution.Id, executionTestId = test.Id, attempt = test.Attempt }, ct);
 
+        // Prepare returns an assignment for diagnostics only — the workflow never
+        // forwards it to the worker (RunWorker rebuilds inside its own activity).
+        // Secret-derived values are masked here so Temporal history never sees
+        // plaintext even though this DTO is persisted as the activity result.
         return new PreparedExecution(executionId, test.Id, true, null,
-            await BuildAssignmentAsync(execution, test, testCase, version, ct), null);
+            await BuildAssignmentAsync(execution, test, testCase, version, ct, redactSecrets: true), null);
     }
 
     // ---------- run ----------
@@ -185,13 +197,29 @@ public sealed class ExecutionEngine : IExecutionEngine
                     new { executionId = execution.Id, executionTestId = test.Id, attempt }, ct);
             }
 
-            WorkerAssignmentDto assignment = await BuildAssignmentAsync(execution, test, ct);
+            WorkerAssignmentDto assignment;
+            IReadOnlyList<string> runSecrets = Array.Empty<string>();
+            try
+            {
+                (assignment, runSecrets) = await BuildTrustedAssignmentAsync(execution, test, ct);
+            }
+            catch (ConflictException ex)
+            {
+                // Deterministic variable/secret failure: missing variable or
+                // unavailable secret. Never leaks values (message carries only names).
+                return new WorkerExecutionOutcome(
+                    ExecutionTestStatus.Error, FailureClassification.AutomationFailure,
+                    nameof(Common.ConflictException), Truncate(ex.Message),
+                    total.ElapsedMilliseconds,
+                    Array.Empty<WorkerStepResultDto>(), Array.Empty<WorkerLogDto>(),
+                    Array.Empty<WorkerScreenshotDto>(), test.Attempt);
+            }
             try
             {
                 var outcome = await DispatchAndTrackAsync(
-                    execution, test, assignment, heartbeatAsync, ct);
+                    execution, test, assignment, runSecrets, heartbeatAsync, ct);
                 outcome = outcome with { Attempt = attempt, DurationMs = total.ElapsedMilliseconds };
-                return outcome;
+                return SanitizeOutcome(outcome, runSecrets);
             }
             catch (WorkerInfrastructureException ex) when (attempt < MaxAttempts && ex.IsRetryable)
             {
@@ -206,7 +234,7 @@ public sealed class ExecutionEngine : IExecutionEngine
                     // Deterministic contract rejection: automation failure, no retry.
                     return new WorkerExecutionOutcome(
                         ExecutionTestStatus.Error, FailureClassification.AutomationFailure,
-                        nameof(WorkerInfrastructureException), Truncate(ex.Message),
+                        nameof(WorkerInfrastructureException), RedactTruncate(ex.Message),
                         total.ElapsedMilliseconds,
                         Array.Empty<WorkerStepResultDto>(), Array.Empty<WorkerLogDto>(),
                         Array.Empty<WorkerScreenshotDto>(), test.Attempt);
@@ -221,7 +249,7 @@ public sealed class ExecutionEngine : IExecutionEngine
         return new WorkerExecutionOutcome(
             ExecutionTestStatus.Error, FailureClassification.EnvironmentFailure,
             nameof(WorkerInfrastructureException),
-            Truncate(lastInfraError?.Message ?? "The Playwright worker is unreachable."),
+            RedactTruncate(lastInfraError?.Message ?? "The Playwright worker is unreachable."),
             total.ElapsedMilliseconds,
             Array.Empty<WorkerStepResultDto>(), Array.Empty<WorkerLogDto>(),
             Array.Empty<WorkerScreenshotDto>(), test.Attempt);
@@ -229,6 +257,7 @@ public sealed class ExecutionEngine : IExecutionEngine
 
     private async Task<WorkerExecutionOutcome> DispatchAndTrackAsync(
         Execution execution, ExecutionTest test, WorkerAssignmentDto assignment,
+        IReadOnlyList<string> secretValues,
         Func<Task>? heartbeatAsync, CancellationToken ct)
     {
         var started = Stopwatch.StartNew();
@@ -267,7 +296,7 @@ public sealed class ExecutionEngine : IExecutionEngine
                                 target = step.Target,
                                 status = step.Status,
                                 durationMs = step.DurationMs,
-                                errorMessage = RedactTruncate(step.ErrorMessage),
+                                errorMessage = RedactTruncate(step.ErrorMessage, secretValues),
                                 healed = step.Healed,
                                 recoveredTarget = step.RecoveredTarget,
                                 healingStrategy = step.HealingStrategy,
@@ -277,23 +306,28 @@ public sealed class ExecutionEngine : IExecutionEngine
             }
             var newLogs = progress.Logs.Where(l => seenLogs.Add(l.Seq)).ToList();
             if (newLogs.Count > 0)
+                // Slice 3A: the live SignalR path applies the same secret-aware
+                // redaction as persistence (previously raw). Secret values never
+                // stream to subscribers.
                 await _events.PublishAsync(execution.Id, ExecutionEvents.ExecutionLogReceived,
                     new
                     {
                         executionId = execution.Id,
                         executionTestId = test.Id,
-                        logs = newLogs.Select(l => new { timestamp = l.TimestampUnixMs, level = l.Level, message = l.Message }),
+                        logs = newLogs.Select(l => new { timestamp = l.TimestampUnixMs, level = l.Level, message = RedactTruncate(l.Message, secretValues) }),
                     }, ct);
 
             if (progress.Result is not null)
             {
                 var result = progress.Result;
-                return new WorkerExecutionOutcome(
+                // Sanitize worker-echoed text before it enters the outcome (which
+                // flows into Temporal history via the activity return).
+                return SanitizeOutcome(new WorkerExecutionOutcome(
                     MapWorkerStatus(result.Status), MapClassification(result.Classification),
                     result.ErrorType, Truncate(result.ErrorMessage),
                     started.ElapsedMilliseconds,
                     result.StepResults, result.Logs, result.Screenshots, test.Attempt,
-                    result.HealingAttempts ?? Array.Empty<WorkerHealingAttemptDto>());
+                    result.HealingAttempts ?? Array.Empty<WorkerHealingAttemptDto>()), secretValues);
             }
 
             await Task.Delay(TimeSpan.FromSeconds(_options.Value.WorkerPollIntervalSeconds), ct);
@@ -334,6 +368,11 @@ public sealed class ExecutionEngine : IExecutionEngine
         }
 
         var now = _clock.UtcNow;
+        // Slice 3A: re-resolve secret values in this activity scope for
+        // exact-match masking of worker-echoed text. Best-effort: persist must
+        // never fail because the secret backend is down (heuristic redaction
+        // still applies). Values stay in memory and are never stored.
+        var persistSecrets = await LoadSecretValuesForMaskingAsync(execution, ct);
         await _store.AddStepResultsAsync(outcome.Steps.Select(s => new ExecutionStepResult
         {
             ExecutionTestId = test.Id,
@@ -344,7 +383,7 @@ public sealed class ExecutionEngine : IExecutionEngine
             StartedAt = FromUnixMs(s.StartedAtUnixMs),
             CompletedAt = FromUnixMs(s.CompletedAtUnixMs),
             DurationMs = s.DurationMs,
-            ErrorMessage = RedactTruncate(s.ErrorMessage),
+            ErrorMessage = RedactTruncate(s.ErrorMessage, persistSecrets),
         }), ct);
 
         var logRows = new List<ExecutionLog>();
@@ -354,7 +393,7 @@ public sealed class ExecutionEngine : IExecutionEngine
                 ExecutionTestId = test.Id,
                 Timestamp = FromUnixMs(log.TimestampUnixMs),
                 Level = log.Level,
-                Message = SensitiveDataRedactor.Redact(log.Message),
+                Message = RedactTruncate(log.Message, persistSecrets) ?? string.Empty,
                 Metadata = null,
             });
         await _store.AppendLogsAsync(logRows, ct);
@@ -369,7 +408,7 @@ public sealed class ExecutionEngine : IExecutionEngine
         test.FailureClassification = outcome.Classification;
         test.DurationMs = outcome.DurationMs;
         test.ErrorType = outcome.ErrorType;
-        test.ErrorMessage = RedactTruncate(outcome.ErrorMessage);
+        test.ErrorMessage = RedactTruncate(outcome.ErrorMessage, persistSecrets);
         test.UpdatedAt = now;
         execution.Status = MapExecutionStatus(outcome.Status);
         execution.CompletedAt = now;
@@ -552,31 +591,172 @@ public sealed class ExecutionEngine : IExecutionEngine
         var testCase = await _cases.GetByIdAsync(test.TestCaseId, ct);
         if (version is null || testCase is null)
             throw new WorkerInfrastructureException("The bound test case version is unavailable.");
-        return await BuildAssignmentAsync(execution, test, testCase, version, ct);
+        // Retry path rebuilds inside the trusted activity: full values.
+        var (assignment, _) = await BuildTrustedAssignmentAsync(execution, test, testCase, version, redactSecrets: false, ct);
+        return assignment;
+    }
+
+    private async Task<(WorkerAssignmentDto Assignment, IReadOnlyList<string> SecretValues)> BuildTrustedAssignmentAsync(
+        Execution execution, ExecutionTest test, CancellationToken ct)
+    {
+        var version = test.TestCaseVersionId is not null
+            ? await _cases.GetVersionByIdAsync(test.TestCaseVersionId.Value, ct)
+            : null;
+        var testCase = await _cases.GetByIdAsync(test.TestCaseId, ct);
+        if (version is null || testCase is null)
+            throw new WorkerInfrastructureException("The bound test case version is unavailable.");
+        return await BuildTrustedAssignmentAsync(execution, test, testCase, version, redactSecrets: false, ct);
     }
 
     private async Task<WorkerAssignmentDto> BuildAssignmentAsync(
         Execution execution, ExecutionTest test, TestCase testCase, TestCaseVersion version,
-        CancellationToken ct)
+        CancellationToken ct, bool redactSecrets = false)
+        => (await BuildTrustedAssignmentAsync(execution, test, testCase, version, redactSecrets, ct)).Assignment;
+
+    /// <summary>
+    /// Slice 3A: substitutes ${{ KEY }} placeholders with resolved variables
+    /// (single-pass). Secret resolution happens here, inside the trusted
+    /// activity scope. When <paramref name="redactSecrets"/> is set (Prepare
+    /// path, whose DTO enters Temporal history), secret-derived values are
+    /// masked before return. The worker-bound path keeps plaintext only in
+    /// memory for the direct HTTPS dispatch.
+    /// </summary>
+    private async Task<(WorkerAssignmentDto Assignment, IReadOnlyList<string> SecretValues)> BuildTrustedAssignmentAsync(
+        Execution execution, ExecutionTest test, TestCase testCase, TestCaseVersion version,
+        bool redactSecrets, CancellationToken ct)
     {
+        var (values, secretValues, secretKeys) = await ResolveVariablesForEngineAsync(execution, ct);
         var steps = TestStep.Parse(version.StructuredSteps?.RootElement);
-        var workerSteps = steps.Select(s => new WorkerStepDto(
-            s.Order, s.Action, s.Target,
-            ExecutionValueRedactor.RedactStepValue(s.Action, s.Target, s.Value))).ToList();
-        var targetUrl = steps.FirstOrDefault(s =>
+        var workerSteps = steps.Select(s =>
+        {
+            string? target, value;
+            bool valueHadSecret;
+            try
+            {
+                (target, _) = VariableModel.SubstituteSecretAware(s.Target, values, secretKeys);
+                (value, valueHadSecret) = VariableModel.SubstituteSecretAware(s.Value, values, secretKeys);
+            }
+            catch (Common.ConflictException ex)
+            {
+                throw new Common.ConflictException(
+                    $"Step {s.Order} ({s.Action}) references an undefined variable: {ex.Message}");
+            }
+            if (redactSecrets)
+            {
+                // Mask secret-derived content so the Prepare DTO (persisted in
+                // Temporal history) carries no plaintext. Heuristic redaction
+                // still applies downstream as defense in depth.
+                target = VariableModel.MaskSecrets(target, secretValues);
+                value = ExecutionValueRedactor.RedactStepValue(s.Action, s.Target, VariableModel.MaskSecrets(value, secretValues));
+            }
+            else if (valueHadSecret)
+            {
+                // Secret-derived values travel plaintext over the trusted,
+                // authenticated worker transport only. Exact-match masking at
+                // every observability boundary keeps them out of logs,
+                // SignalR, Temporal history, and persistence.
+            }
+            else
+            {
+                value = ExecutionValueRedactor.RedactStepValue(s.Action, target, value);
+            }
+            return new WorkerStepDto(s.Order, s.Action, target, value);
+        }).ToList();
+        var targetUrl = steps.Select(s => new
+            {
+                s.Action,
+                Target = VariableModel.Substitute(s.Target, values),
+            })
+            .FirstOrDefault(s =>
                 string.Equals(s.Action, "navigate", StringComparison.OrdinalIgnoreCase) &&
                 !string.IsNullOrWhiteSpace(s.Target))?.Target;
+        if (redactSecrets)
+            targetUrl = VariableModel.MaskSecrets(targetUrl, secretValues);
         var timeouts = new WorkerTimeoutsDto(
             (int)_options.Value.ExecutionTimeout.TotalMilliseconds,
             (int)_options.Value.StepTimeout.TotalMilliseconds);
-        return new WorkerAssignmentDto(
+        return (new WorkerAssignmentDto(
             test.Id.ToString("N"), execution.Id.ToString("N"),
             string.IsNullOrWhiteSpace(test.Framework) ? "playwright" : test.Framework!,
             string.IsNullOrWhiteSpace(test.Browser) ? "chromium" : test.Browser!,
             targetUrl, workerSteps, timeouts,
             ScreenshotOnFailure: true, ScreenshotOnFinish: false,
             test.AssignmentToken ?? Guid.Empty,
-            await ResolveHealingPolicyAsync(execution.ProjectId, ct));
+            await ResolveHealingPolicyAsync(execution.ProjectId, ct)), secretValues);
+    }
+
+    /// <summary>
+    /// Resolves variables for an execution. Legacy environment-less executions
+    /// (null EnvironmentId, no envelope) resolve to empty — steps run literally
+    /// as in Phase 2. Returns (values, secretValues-for-masking).
+    /// </summary>
+    private async Task<(IReadOnlyDictionary<string, string> Values, IReadOnlyList<string> SecretValues, IReadOnlySet<string> SecretKeys)> ResolveVariablesForEngineAsync(
+        Execution execution, CancellationToken ct)
+    {
+        if (_varResolver is null || _envelopes is null)
+            return (new Dictionary<string, string>(StringComparer.Ordinal), Array.Empty<string>(),
+                new HashSet<string>(StringComparer.Ordinal));
+        var envelope = await _envelopes.GetByExecutionAsync(execution.Id, ct);
+        var environmentId = envelope?.EnvironmentId ?? execution.EnvironmentId;
+        if (!environmentId.HasValue)
+            return (new Dictionary<string, string>(StringComparer.Ordinal), Array.Empty<string>(),
+                new HashSet<string>(StringComparer.Ordinal));
+        try
+        {
+            var resolved = await _varResolver.ResolveForExecutionAsync(
+                execution.ProjectId, environmentId.Value, envelope?.SuiteId, execution.Id, ct);
+            return (resolved.Values, resolved.SecretValues, resolved.SecretKeys);
+        }
+        catch (Common.ConflictException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Secret/variable backend down: deterministic automation failure,
+            // never plaintext, never silent substitution.
+            throw new Common.ConflictException(
+                $"Variables could not be resolved for this environment: {ex.GetType().Name}");
+        }
+    }
+
+    /// <summary>Best-effort secret reload for masking persisted/worker-echoed text.</summary>
+    private async Task<IReadOnlyList<string>> LoadSecretValuesForMaskingAsync(
+        Execution execution, CancellationToken ct)
+    {
+        try
+        {
+            return (await ResolveVariablesForEngineAsync(execution, ct)).SecretValues;
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    /// <summary>
+    /// Secret-aware outcome sanitizer: exact-match masks secret-derived values
+    /// in every worker-echoed string, then applies heuristic redaction.
+    /// The sanitized outcome is what enters Temporal history and persistence.
+    /// </summary>
+    private static WorkerExecutionOutcome SanitizeOutcome(
+        WorkerExecutionOutcome outcome, IReadOnlyList<string> secretValues)
+    {
+        if (secretValues is null || secretValues.Count == 0)
+            return new WorkerExecutionOutcome(
+                outcome.Status, outcome.Classification, outcome.ErrorType,
+                RedactTruncate(outcome.ErrorMessage),
+                outcome.DurationMs,
+                outcome.Steps.Select(s => s with { ErrorMessage = RedactTruncate(s.ErrorMessage) }).ToList(),
+                outcome.Logs.Select(l => l with { Message = RedactTruncate(l.Message) ?? string.Empty }).ToList(),
+                outcome.Screenshots, outcome.Attempt, outcome.HealingAttempts);
+        return new WorkerExecutionOutcome(
+            outcome.Status, outcome.Classification, outcome.ErrorType,
+            RedactTruncate(outcome.ErrorMessage, secretValues),
+            outcome.DurationMs,
+            outcome.Steps.Select(s => s with { ErrorMessage = RedactTruncate(s.ErrorMessage, secretValues) }).ToList(),
+            outcome.Logs.Select(l => l with { Message = RedactTruncate(l.Message, secretValues) ?? string.Empty }).ToList(),
+            outcome.Screenshots, outcome.Attempt, outcome.HealingAttempts);
     }
 
     /// <summary>
@@ -743,6 +923,15 @@ public sealed class ExecutionEngine : IExecutionEngine
     /// <summary>Defense in depth: worker-echoed text is re-redacted before persistence.</summary>
     private static string? RedactTruncate(string? value)
         => value is null ? null : Truncate(SensitiveDataRedactor.Redact(value));
+
+    /// <summary>
+    /// Slice 3A secret-aware variant: exact secret-derived values are masked
+    /// first (covers all actions, not just password-like targets), then the
+    /// heuristic redactor runs as defense in depth.
+    /// </summary>
+    private static string? RedactTruncate(string? value, IReadOnlyList<string>? secretValues)
+        => value is null ? null : Truncate(SensitiveDataRedactor.Redact(
+            VariableModel.MaskSecrets(value, secretValues) ?? string.Empty));
 
     private static string Slug(string? fileName)
     {

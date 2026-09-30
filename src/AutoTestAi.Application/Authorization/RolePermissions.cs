@@ -30,6 +30,10 @@ public static class RolePermissions
                 Permissions.BugsRead, Permissions.BugsManage,
                 Permissions.TicketsRead, Permissions.TicketsCreate,
                 Permissions.ReportsRead,
+                // Slice 3A: QA leads manage project-scoped variables/secrets
+                // (like environments via projects.manage). Testers cannot;
+                // global settings remain admin-only.
+                Permissions.VariablesManage, Permissions.SecretsManage,
             },
             [AppRoles.Tester] = new[]
             {

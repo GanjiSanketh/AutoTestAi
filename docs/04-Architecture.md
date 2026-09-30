@@ -431,3 +431,42 @@ Rules:
 - `/hubs/execution` requires authentication; `SubscribeToExecution` resolves
   the execution's project and enforces `executions.read` + membership before
   joining the group. Event names are unchanged.
+
+## 14. Multi-Environment Vault & Dynamic Variables (Phase 3 Slice 3A)
+
+Single `VariableSet` aggregate (`Project` | `Environment` | `Suite` scopes,
+one set per scope) with entries shaped `{ "KEY": { "value": "..." } }` or
+`{ "KEY": { "secretRef": "env_secret:<id>" } }`. Keys match
+`^[A-Z0-9_]{1,64}$`; raw-string entries and raw secrets are rejected.
+Precedence is deterministic: System (read-only `BROWSER` default) →
+Project → Environment → Suite → Execution Override (plain values +
+`secretRef` only). Missing variables fail deterministically (never
+null/empty substitution). Substitution is single-pass `${{ KEY }}` — no
+eval, no recursion.
+
+Secrets split capabilities: `ISecretResolver` (`ResolveAsync`/`ExistsAsync`,
+execution path only) vs `ISecretStore` (create/update/delete, management
+path only). Values are sealed with AES-256-GCM under an externally
+controlled KEK (`Secrets:KekBase64`; explicit non-production dev key with a
+production refusal guard) in `environment_secrets` (ciphertext + nonce +
+key version only). The API returns metadata (`id`, `name`,
+`secretReference`, `hasValue`) — never values.
+
+Resolution happens only inside the Temporal `RunWorkerExecutionAsync`
+activity scope: `ExecutionCommand` (source-agnostic; `EnvironmentId`
+required — explicit id, else the project's Active default, else deterministic
+rejection; legacy null-`EnvironmentId` executions keep Phase 2 behavior) →
+`VariableSet` merge → `ISecretResolver` → in-memory `SecretValue` → HTTPS
+worker dispatch (Bearer + assignment-token fencing, no body/header logging).
+`PrepareAsync` masks secret-derived content so Temporal history never sees
+plaintext; activity returns are sanitized with exact-match secret masking
+plus heuristic redaction. Live SignalR `LogReceived` applies the same
+secret-aware redaction as persistence. New permissions `variables.manage`
+(admin + qa-lead) and `secrets.manage` (admin + qa-lead); testers cannot
+manage secrets; reads expose metadata/plain values only.
+
+Limitations: secrets baked into screenshot pixels cannot be scrubbed in 3A
+(artifacts stay `executions.read`-gated with 900s URLs); browser-artifact
+policy prefers password-type inputs and forbids secrets in URLs.
+CI/CD webhooks, Appium/mobile, and visual regression are explicitly NOT part
+of Slice 3A.

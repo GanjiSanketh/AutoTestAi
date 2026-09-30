@@ -107,7 +107,11 @@ export function ProjectEnvironmentsPage() {
           </Link>
           <h1 className="mt-2 text-xl font-semibold text-slate-900">Environments</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Target environment metadata. Secrets are managed separately in a later phase.
+            Target environment metadata. Manage{' '}
+            <Link to={`/projects/${projectId}/variables`} className="text-brand-700 hover:text-brand-600">
+              variables &amp; secrets
+            </Link>{' '}
+            per environment.
           </p>
         </div>
         {canManage && (

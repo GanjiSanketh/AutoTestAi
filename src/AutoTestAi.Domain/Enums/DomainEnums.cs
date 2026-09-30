@@ -164,6 +164,17 @@ public enum GridAssignmentStatus
 }
 
 /// <summary>
+/// Variable-set scoping (Phase 3 Slice 3A). Single aggregate with a scope
+/// discriminator instead of three parallel entities.
+/// </summary>
+public enum VariableScopeType
+{
+    Project = 0,
+    Environment = 1,
+    Suite = 2
+}
+
+/// <summary>
 /// Self-healing attempt lifecycle (Phase 2 Slice 11). One row per
 /// (execution test, step) captures the final outcome; the granular
 /// candidate lifecycle lives in execution logs, not rows.

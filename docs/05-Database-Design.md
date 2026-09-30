@@ -21,6 +21,9 @@ execution_tests → self_healing_attempts
 projects → self_healing_policies
 projects → defects → tickets
 projects → integrations
+projects → variable_sets (Slice 3A)
+projects → environment_secrets (Slice 3A)
+executions → execution_variables (Slice 3A)
 users/projects → audit_events
 ```
 
@@ -104,6 +107,15 @@ users/projects → audit_events
 ### audit_events
 `id BIGSERIAL PK`, `actor_user_id`, `action`, `entity_type`, `entity_id`, `project_id`, `ip_address`, `user_agent`, `metadata JSONB`, `created_at`.
 
+### variable_sets (Slice 3A)
+`id UUID PK`, `project_id FK`, `scope_type` (Project/Environment/Suite, string), `scope_id NULL` (NULL for Project scope; environment/suite id otherwise), `name` (≤200), `variables_json TEXT` (key → `{value}` | `{secretRef}`; raw secrets rejected at the application layer), `row_version` (optimistic concurrency), timestamps. Unique `project_id WHERE scope_type='Project'` (one project set); unique `(project_id,scope_type,scope_id) WHERE scope_id IS NOT NULL` (one set per environment/suite).
+
+### environment_secrets (Slice 3A)
+`id UUID PK`, `project_id FK`, `environment_id FK`, `name` (≤200, unique per environment), `secret_reference` (opaque `env_secret:<id>`, ≤256), `description NULL`, `encrypted_value NULL` (base64 AES-256-GCM ciphertext — never plaintext), `nonce NULL` (base64), `key_version` (≤50), `row_version`, timestamps. No plaintext secret column exists.
+
+### execution_variables (Slice 3A)
+`execution_id UUID PK`, `project_id`, `suite_id NULL`, `environment_id NULL`, `variable_overrides_json TEXT` (flat key→value), `secret_ref_overrides_json TEXT` (flat key→secretRef; raw secrets rejected), `created_at`. Refs only — secret values never persist here.
+
 ## 4. Important Indexes
 
 Index project membership, project/test status, test versions, execution project/status, execution-test status, execution-log `(execution_test_id,timestamp)`, defects `(project_id,status)`, tickets `(project_id,sync_status)`, grid_workers `(status)`, `grid_workers (last_heartbeat_at)`, `grid_assignments (execution_test_id)` filtered unique, `grid_assignments (worker_id, expires_at)`, and audit `(project_id,created_at)`.
@@ -131,6 +143,11 @@ One index-only migration adds `IX_executions_Project_Created`
 (`self_healing_attempts(project_id,created_at)`) for healing window
 queries. No other indexes were justified: defects, test cases, and
 execution-test joins reuse existing indexes.
+
+Slice 3A adds `variable_sets`, `environment_secrets`, and
+`execution_variables` (one additive migration, no changes to historical
+rows; `executions.environment_id` stays nullable for legacy
+environment-less executions).
 
 ## 5. JSONB
 

@@ -5,9 +5,11 @@ using AutoTestAi.Application.Common;
 using AutoTestAi.Application.Defects;
 using AutoTestAi.Application.FailureAnalysis;
 using AutoTestAi.Application.Projects;
+using AutoTestAi.Application.Secrets;
 using AutoTestAi.Application.TestCases;
 using AutoTestAi.Application.TestExecution;
 using AutoTestAi.Application.TestGeneration;
+using AutoTestAi.Application.Variables;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AutoTestAi.Application;
@@ -47,6 +49,9 @@ public static class DependencyInjection
         services.AddScoped<Tickets.IAutomatedTicketService, Tickets.AutomatedTicketService>();
         services.AddScoped<Reports.IDashboardService, Reports.DashboardService>();
         services.AddScoped<Reports.IReportService, Reports.ReportService>();
+        services.AddScoped<Variables.IVariableSetService, Variables.VariableSetService>();
+        services.AddScoped<Variables.IVariableResolutionService, Variables.VariableResolutionService>();
+        services.AddScoped<Secrets.ISecretMetadataService, Secrets.SecretMetadataService>();
         services.AddScoped<ExecutionGrid.IExecutionGridService, ExecutionGrid.ExecutionGridService>();
         services.AddScoped<ExecutionGrid.IGridScheduler, ExecutionGrid.GridScheduler>();
         services.AddScoped<ExecutionGrid.IGridLeaseManager, ExecutionGrid.GridLeaseManager>();

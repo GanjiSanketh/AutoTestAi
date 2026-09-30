@@ -11,7 +11,10 @@ public sealed record StartExecutionCommand(
     Guid TestCaseVersionId,
     Guid? EnvironmentId = null,
     string? Browser = null,
-    string? IdempotencyKey = null);
+    string? IdempotencyKey = null,
+    Guid? SuiteId = null,
+    IReadOnlyDictionary<string, string>? VariableOverrides = null,
+    IReadOnlyDictionary<string, string>? SecretRefOverrides = null);
 
 public sealed record ExecutionFilters(
     string? Status,

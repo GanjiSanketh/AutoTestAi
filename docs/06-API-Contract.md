@@ -789,3 +789,19 @@ only; `FailureAnalysisCompleted` is published on success.
   
  S e c u r i t y :   w o r k e r   c r e d e n t i a l s   n e v e r   r e t u r n e d   a f t e r   r e g i s t r a t i o n ;   n e v e r   l o g g e d ;   n e v e r   i n   a u d i t .   M a c h i n e   a u t h   o n l y   o n   w o r k e r - p l a n e   r o u t e s .  
  
+
+## Slice 3A - Variables & Secrets
+
+Variable sets (ariables.manage for writes, projects.read for reads; project-isolated, IDOR-tested):
+
+- POST /api/v1/projects/{projectId}/variable-sets - body {scopeType: Project|Environment|Suite, scopeId?, name, variables: {KEY: {value} | {secretRef}}}. Raw-string values and raw secrets return 400. Duplicate scope returns 409.
+- GET /api/v1/projects/{projectId}/variable-sets - keys plus secret-key flags; plain values visible to readers, secret values never stored or returned.
+- GET /api/v1/variable-sets/{id} / PUT /api/v1/variable-sets/{id} (body {name, variables, rowVersion?} base64; stale token returns 409) / DELETE /api/v1/variable-sets/{id}.
+
+Secret metadata (secrets.manage for writes; values flow in on create/replace only and are never returned):
+
+- POST /api/v1/projects/{projectId}/secrets - body {environmentId, name, value, description?} returns {id, name, secretReference, hasValue, ...}.
+- GET /api/v1/projects/{projectId}/secrets[?environmentId=] - metadata list, never values.
+- GET /api/v1/secrets/{id}/exists - boolean only. PUT /api/v1/secrets/{id} - rename/replace/describe. DELETE /api/v1/secrets/{id}.
+
+Execution start (extended, not replaced): POST /api/v1/projects/{projectId}/executions accepts environmentId?, suiteId?, ariableOverrides? (flat key/value), secretRefOverrides? (key/secretRef; raw secrets return 400). Environment resolution: explicit id, else the project Active default, else 400 when overrides are present; legacy null-environment executions without overrides keep Phase 2 behavior. Steps support $ + {{ KEY }} placeholders; missing variables fail deterministically. CI/CD webhooks, Appium/mobile, and visual regression are NOT part of this contract.

@@ -5,9 +5,11 @@ using AutoTestAi.Application.Common;
 using AutoTestAi.Application.ExecutionGrid;
 using AutoTestAi.Application.Identity;
 using AutoTestAi.Application.Projects;
+using AutoTestAi.Application.Secrets;
 using AutoTestAi.Application.Storage;
 using AutoTestAi.Application.TestCases;
 using AutoTestAi.Application.TestGeneration;
+using AutoTestAi.Application.Variables;
 using AutoTestAi.Domain.Entities;
 using AutoTestAi.Domain.Enums;
 using AutoTestAi.Domain.Executions;
@@ -41,6 +43,9 @@ public sealed class TestExecutionService : ITestExecutionService
     private readonly IArtifactStorage _artifacts;
     private readonly IGridLeaseManager? _leases;
     private readonly IGridAssignmentStore? _gridAssignments;
+    private readonly IExecutionVariablesStore? _variables;
+    private readonly ITestSuiteLookup? _suites;
+    private readonly ISecretResolver? _secrets;
 
     public TestExecutionService(
         IExecutionStore store,
@@ -55,7 +60,10 @@ public sealed class TestExecutionService : ITestExecutionService
         IExecutionWorkflowCoordinator workflows,
         IArtifactStorage artifacts,
         IGridLeaseManager? leases = null,
-        IGridAssignmentStore? gridAssignments = null)
+        IGridAssignmentStore? gridAssignments = null,
+        IExecutionVariablesStore? variables = null,
+        ITestSuiteLookup? suites = null,
+        ISecretResolver? secrets = null)
     {
         _store = store;
         _cases = cases;
@@ -70,6 +78,9 @@ public sealed class TestExecutionService : ITestExecutionService
         _artifacts = artifacts;
         _leases = leases;
         _gridAssignments = gridAssignments;
+        _variables = variables;
+        _suites = suites;
+        _secrets = secrets;
     }
 
     public async Task<StartExecutionResultDto> StartAsync(
@@ -111,6 +122,14 @@ public sealed class TestExecutionService : ITestExecutionService
             throw new ConflictException(
                 $"Test case version {version.VersionNumber} has review status '{version.ReviewStatus}' and cannot be executed. Only Approved versions may execute.");
 
+        // Slice 3A: environment-aware execution. Legacy Phase 2 executions may
+        // carry a null EnvironmentId (environment-less) and keep working.
+        // New normalized executions resolve to a concrete environment:
+        // explicit id first, then the project's Active default. Overrides
+        // always require an environment — they are rejected otherwise.
+        var hasOverrides = (normalized.VariableOverrides?.Count ?? 0) > 0
+            || (normalized.SecretRefOverrides?.Count ?? 0) > 0;
+        Guid? resolvedEnvironmentId = null;
         if (normalized.EnvironmentId is not null)
         {
             var environment = await _projects.GetEnvironmentByIdAsync(
@@ -118,6 +137,66 @@ public sealed class TestExecutionService : ITestExecutionService
             if (environment is null || environment.ProjectId != normalized.ProjectId)
                 throw new ValidationException("The specified environment does not belong to this project.",
                     new[] { new FieldError("environmentId", "Environment must belong to the project.") });
+            resolvedEnvironmentId = environment.Id;
+        }
+        else
+        {
+            var project = await _projects.GetByIdAsync(normalized.ProjectId, cancellationToken);
+            var defaultEnvId = project?.DefaultEnvironmentId;
+            if (defaultEnvId.HasValue)
+            {
+                var defaultEnv = await _projects.GetEnvironmentByIdAsync(defaultEnvId.Value, cancellationToken);
+                if (defaultEnv is not null
+                    && defaultEnv.ProjectId == normalized.ProjectId
+                    && defaultEnv.Status == Domain.Enums.ProjectStatus.Active)
+                    resolvedEnvironmentId = defaultEnv.Id;
+            }
+            if (resolvedEnvironmentId is null && hasOverrides)
+                throw new ValidationException("An environment is required when variable overrides are supplied.",
+                    new[] { new FieldError("environmentId", "Provide an environment or configure the project default environment.") });
+            // Otherwise: legacy environment-less execution (null preserved).
+        }
+
+        Guid? resolvedSuiteId = null;
+        if (normalized.SuiteId is not null)
+        {
+            if (_suites is null)
+                throw new ValidationException("Suite executions are not supported by this configuration.",
+                    new[] { new FieldError("suiteId", "Suite lookup is unavailable.") });
+            var suite = await _suites.GetSuiteByIdAsync(normalized.SuiteId.Value, cancellationToken);
+            if (suite is null || suite.ProjectId != normalized.ProjectId)
+                throw new ValidationException("The specified suite does not belong to this project.",
+                    new[] { new FieldError("suiteId", "Suite must belong to the project.") });
+            resolvedSuiteId = suite.Id;
+        }
+
+        if (resolvedEnvironmentId.HasValue)
+        {
+            // Validates override shapes and rejects raw secrets in secretRef
+            // overrides. The normalized command never carries secret values.
+            _ = ExecutionCommandFactory.Create(
+                normalized.ProjectId,
+                normalized.TestCaseVersionId,
+                resolvedEnvironmentId.Value,
+                resolvedSuiteId,
+                normalized.Browser ?? "chromium",
+                normalized.VariableOverrides,
+                normalized.SecretRefOverrides,
+                normalized.IdempotencyKey);
+            if (_secrets is not null && normalized.SecretRefOverrides is not null)
+            {
+                foreach (var secretRef in normalized.SecretRefOverrides.Values)
+                {
+                    if (!await _secrets.ExistsAsync(secretRef, cancellationToken))
+                        throw new ValidationException("A secret reference override is unknown.",
+                            new[] { new FieldError("secretRefOverrides", "Each override must reference an existing secret.") });
+                }
+            }
+        }
+        else if (hasOverrides)
+        {
+            throw new ValidationException("An environment is required when variable overrides are supplied.",
+                new[] { new FieldError("environmentId", "Provide an environment or configure the project default environment.") });
         }
 
         var steps = TestStep.Parse(version.StructuredSteps?.RootElement);
@@ -133,7 +212,7 @@ public sealed class TestExecutionService : ITestExecutionService
         {
             ProjectId = normalized.ProjectId,
             TriggerType = TriggerType.Manual,
-            EnvironmentId = normalized.EnvironmentId,
+            EnvironmentId = resolvedEnvironmentId,
             Status = ExecutionStatus.Queued,
             IdempotencyKey = normalized.IdempotencyKey,
             CreatedBy = await ResolveAppUserIdAsync(cancellationToken),
@@ -157,6 +236,24 @@ public sealed class TestExecutionService : ITestExecutionService
         };
         await _store.AddExecutionTestAsync(executionTest, cancellationToken);
         await _store.SaveChangesAsync(cancellationToken);
+
+        // Slice 3A: persist the override envelope (refs only, never values) so
+        // the Temporal activity can reload it by execution id. Workflow args
+        // and history never carry secret values.
+        if (_variables is not null && (resolvedEnvironmentId.HasValue || resolvedSuiteId.HasValue || hasOverrides))
+        {
+            await _variables.SaveAsync(new Domain.Entities.ExecutionVariables
+            {
+                ExecutionId = execution.Id,
+                ProjectId = execution.ProjectId,
+                SuiteId = resolvedSuiteId,
+                EnvironmentId = resolvedEnvironmentId,
+                VariableOverridesJson = JsonSerializer.Serialize(
+                    normalized.VariableOverrides ?? new Dictionary<string, string>()),
+                SecretRefOverridesJson = JsonSerializer.Serialize(
+                    normalized.SecretRefOverrides ?? new Dictionary<string, string>()),
+            }, cancellationToken);
+        }
 
         await _audit.RecordAsync("execution.requested", "execution",
             execution.Id.ToString(), execution.ProjectId,

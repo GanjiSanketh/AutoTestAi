@@ -19,6 +19,8 @@ export const Permissions = {
   TicketsCreate: 'tickets.create',
   ReportsRead: 'reports.read',
   SettingsManage: 'settings.manage',
+  VariablesManage: 'variables.manage',
+  SecretsManage: 'secrets.manage',
 } as const;
 
 export type Permission = (typeof Permissions)[keyof typeof Permissions];

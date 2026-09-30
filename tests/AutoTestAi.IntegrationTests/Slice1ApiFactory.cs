@@ -179,6 +179,17 @@ public class Slice1ApiFactory : WebApplicationFactory<Program>
             services.AddScoped<AutoTestAi.Application.SelfHealing.ISelfHealingPolicyStore, AutoTestAi.Infrastructure.SelfHealing.EfSelfHealingPolicyStore>();
             services.RemoveAll<AutoTestAi.Application.SelfHealing.ISelfHealingAttemptStore>();
             services.AddScoped<AutoTestAi.Application.SelfHealing.ISelfHealingAttemptStore, AutoTestAi.Infrastructure.SelfHealing.EfSelfHealingAttemptStore>();
+            services.RemoveAll<AutoTestAi.Application.Variables.IVariableSetStore>();
+            services.AddScoped<AutoTestAi.Application.Variables.IVariableSetStore, AutoTestAi.Infrastructure.Variables.EfVariableSetStore>();
+            services.RemoveAll<AutoTestAi.Application.Variables.IExecutionVariablesStore>();
+            services.AddScoped<AutoTestAi.Application.Variables.IExecutionVariablesStore, AutoTestAi.Infrastructure.Variables.EfExecutionVariablesStore>();
+            services.RemoveAll<AutoTestAi.Application.Variables.ITestSuiteLookup>();
+            services.AddScoped<AutoTestAi.Application.Variables.ITestSuiteLookup, AutoTestAi.Infrastructure.Variables.EfTestSuiteLookup>();
+            services.RemoveAll<AutoTestAi.Application.Secrets.ISecretResolver>();
+            services.RemoveAll<AutoTestAi.Application.Secrets.ISecretStore>();
+            services.AddScoped<AutoTestAi.Infrastructure.Secrets.EfSecretVault>();
+            services.AddScoped<AutoTestAi.Application.Secrets.ISecretResolver>(provider => provider.GetRequiredService<AutoTestAi.Infrastructure.Secrets.EfSecretVault>());
+            services.AddScoped<AutoTestAi.Application.Secrets.ISecretStore>(provider => provider.GetRequiredService<AutoTestAi.Infrastructure.Secrets.EfSecretVault>());
             services.AddSingleton<IExecutionWorkflowCoordinator>(WorkflowCoordinator);
             services.RemoveAll<ITestExecutionWorkflowStarter>();
             services.AddSingleton<ITestExecutionWorkflowStarter>(new FakeWorkflowStarter());

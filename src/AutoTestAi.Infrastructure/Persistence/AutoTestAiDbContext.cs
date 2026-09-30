@@ -41,6 +41,9 @@ public sealed class AutoTestAiDbContext : DbContext
     public DbSet<AutoTicketPolicy> AutoTicketPolicies => Set<AutoTicketPolicy>();
     public DbSet<SelfHealingPolicy> SelfHealingPolicies => Set<SelfHealingPolicy>();
     public DbSet<SelfHealingAttempt> SelfHealingAttempts => Set<SelfHealingAttempt>();
+    public DbSet<VariableSet> VariableSets => Set<VariableSet>();
+    public DbSet<EnvironmentSecret> EnvironmentSecrets => Set<EnvironmentSecret>();
+    public DbSet<ExecutionVariables> ExecutionVariables => Set<ExecutionVariables>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -242,6 +245,37 @@ public sealed class AutoTestAiDbContext : DbContext
         modelBuilder.Entity<SelfHealingAttempt>().Property(a => a.ErrorMessage).HasMaxLength(2000);
 
         ApplyInMemoryJsonCompatibility(modelBuilder);
+
+        // --- variables & secrets (Phase 3 Slice 3A, additive) ---
+        modelBuilder.Entity<VariableSet>().ToTable("variable_sets");
+        modelBuilder.Entity<VariableSet>().HasIndex(v => v.ProjectId);
+        modelBuilder.Entity<VariableSet>().HasIndex(v => new { v.ProjectId, v.ScopeType, v.ScopeId });
+        // One project-scope set per project.
+        modelBuilder.Entity<VariableSet>()
+            .HasIndex(v => v.ProjectId)
+            .IsUnique()
+            .HasDatabaseName("IX_variable_sets_Project_Once")
+            .HasFilter("\"ScopeType\" = 'Project'");
+        // One set per environment/suite scope.
+        modelBuilder.Entity<VariableSet>()
+            .HasIndex(v => new { v.ProjectId, v.ScopeType, v.ScopeId })
+            .IsUnique()
+            .HasDatabaseName("IX_variable_sets_Scope_Once")
+            .HasFilter("\"ScopeId\" IS NOT NULL");
+        modelBuilder.Entity<VariableSet>().Property(v => v.ScopeType).HasConversion<string>();
+        modelBuilder.Entity<VariableSet>().Property(v => v.Name).HasMaxLength(200);
+        modelBuilder.Entity<VariableSet>().Property(v => v.RowVersion).IsRowVersion();
+        modelBuilder.Entity<EnvironmentSecret>().ToTable("environment_secrets");
+        modelBuilder.Entity<EnvironmentSecret>().HasIndex(s => s.ProjectId);
+        modelBuilder.Entity<EnvironmentSecret>().HasIndex(s => new { s.ProjectId, s.EnvironmentId });
+        modelBuilder.Entity<EnvironmentSecret>()
+            .HasIndex(s => new { s.ProjectId, s.EnvironmentId, s.Name }).IsUnique();
+        modelBuilder.Entity<EnvironmentSecret>().Property(s => s.Name).HasMaxLength(200);
+        modelBuilder.Entity<EnvironmentSecret>().Property(s => s.SecretReference).HasMaxLength(256);
+        modelBuilder.Entity<EnvironmentSecret>().Property(s => s.KeyVersion).HasMaxLength(50);
+        modelBuilder.Entity<EnvironmentSecret>().Property(s => s.RowVersion).IsRowVersion();
+        modelBuilder.Entity<ExecutionVariables>().ToTable("execution_variables");
+        modelBuilder.Entity<ExecutionVariables>().HasKey(e => e.ExecutionId);
 
         // --- audit ---
         modelBuilder.Entity<AuditEvent>().ToTable("audit_events");

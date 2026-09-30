@@ -106,13 +106,15 @@ public sealed class TestExecutionServiceTests
     {
         public readonly List<AuditEvent> Audits = new();
         public readonly Dictionary<Guid, TestEnvironment> Environments = new();
+        public readonly Dictionary<Guid, Project> Projects = new();
         public Task RecordAuditAsync(AuditEvent e, CancellationToken ct) { Audits.Add(e); return Task.CompletedTask; }
         public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
         public Task<TestEnvironment?> GetEnvironmentByIdAsync(Guid id, CancellationToken ct)
             => Task.FromResult(Environments.TryGetValue(id, out var env) ? env : null);
         public Task<int> CountAccessibleAsync(string? e, bool a, string? s, CancellationToken ct) => throw new NotImplementedException();
         public Task<IReadOnlyList<ProjectListRow>> ListAccessibleAsync(string? e, bool a, string? s, int sk, int t, CancellationToken ct) => throw new NotImplementedException();
-        public Task<Project?> GetByIdAsync(Guid p, CancellationToken ct) => throw new NotImplementedException();
+        public Task<Project?> GetByIdAsync(Guid p, CancellationToken ct)
+            => Task.FromResult(Projects.TryGetValue(p, out var project) ? project : null);
         public Task<Project?> GetByKeyAsync(string k, CancellationToken ct) => throw new NotImplementedException();
         public Task AddProjectAsync(Project p, CancellationToken ct) => throw new NotImplementedException();
         public Task<User?> GetUserByIdAsync(Guid u, CancellationToken ct) => throw new NotImplementedException();

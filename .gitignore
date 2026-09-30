@@ -23,7 +23,7 @@ npm-debug.log*
 *.pfx
 *.pem
 *.key
-secrets/
+/secrets/
 credentials.json
 
 # Playwright artifacts

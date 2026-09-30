@@ -2,17 +2,21 @@ using AutoTestAi.Application.AI;
 using AutoTestAi.Application.Defects;
 using AutoTestAi.Application.Identity;
 using AutoTestAi.Application.Projects;
+using AutoTestAi.Application.Secrets;
 using AutoTestAi.Application.Storage;
 using AutoTestAi.Application.TestCases;
 using AutoTestAi.Application.TestExecution;
+using AutoTestAi.Application.Variables;
 using AutoTestAi.Infrastructure.AI;
 using AutoTestAi.Infrastructure.Cache;
 using AutoTestAi.Infrastructure.Executions;
 using AutoTestAi.Infrastructure.Identity;
 using AutoTestAi.Infrastructure.Persistence;
 using AutoTestAi.Infrastructure.Projects;
+using AutoTestAi.Infrastructure.Secrets;
 using AutoTestAi.Infrastructure.Storage;
 using AutoTestAi.Infrastructure.TestCases;
+using AutoTestAi.Infrastructure.Variables;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -32,6 +36,7 @@ public static class DependencyInjection
     {
         services.Configure<ValkeyOptions>(configuration.GetSection(ValkeyOptions.SectionName));
         services.Configure<MinioOptions>(configuration.GetSection(MinioOptions.SectionName));
+        services.Configure<SecretVaultOptions>(configuration.GetSection(SecretVaultOptions.SectionName));
 
         var connectionString = configuration.GetConnectionString("Postgres");
         if (!string.IsNullOrWhiteSpace(connectionString))
@@ -54,6 +59,14 @@ public static class DependencyInjection
             services.AddScoped<Application.ExecutionGrid.IGridAssignmentStore, ExecutionGrid.EfGridAssignmentStore>();
             services.AddScoped<Application.SelfHealing.ISelfHealingPolicyStore, SelfHealing.EfSelfHealingPolicyStore>();
             services.AddScoped<Application.SelfHealing.ISelfHealingAttemptStore, SelfHealing.EfSelfHealingAttemptStore>();
+            services.AddScoped<IVariableSetStore, EfVariableSetStore>();
+            services.AddScoped<IExecutionVariablesStore, EfExecutionVariablesStore>();
+            services.AddScoped<ITestSuiteLookup, EfTestSuiteLookup>();
+            // Slice 3A: one vault class, two narrow capabilities. Execution
+            // code resolves ISecretResolver; management resolves ISecretStore.
+            services.AddScoped<EfSecretVault>();
+            services.AddScoped<ISecretResolver>(provider => provider.GetRequiredService<EfSecretVault>());
+            services.AddScoped<ISecretStore>(provider => provider.GetRequiredService<EfSecretVault>());
         }
         else
         {
@@ -75,6 +88,11 @@ public static class DependencyInjection
             services.AddSingleton<Application.ExecutionGrid.IGridAssignmentStore, ExecutionGrid.UnavailableGridAssignmentStore>();
             services.AddSingleton<Application.SelfHealing.ISelfHealingPolicyStore, SelfHealing.UnavailableSelfHealingPolicyStore>();
             services.AddSingleton<Application.SelfHealing.ISelfHealingAttemptStore, SelfHealing.UnavailableSelfHealingAttemptStore>();
+            services.AddSingleton<IVariableSetStore, Variables.UnavailableVariableSetStore>();
+            services.AddSingleton<IExecutionVariablesStore, Variables.UnavailableExecutionVariablesStore>();
+            services.AddSingleton<ITestSuiteLookup, Variables.UnavailableTestSuiteLookup>();
+            services.AddSingleton<ISecretResolver, Secrets.UnavailableSecretResolver>();
+            services.AddSingleton<ISecretStore, Secrets.UnavailableSecretStore>();
         }
 
         // Dapper remains referenced for future read-model queries (docs/04);

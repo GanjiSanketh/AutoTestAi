@@ -223,6 +223,8 @@ app.MapProjectEndpoints();
 app.MapTestCaseEndpoints();
 app.MapTestGenerationEndpoints();
 app.MapExecutionEndpoints();
+app.MapVariableSetEndpoints();
+app.MapSecretEndpoints();
 app.MapFailureAnalysisEndpoints();
 app.MapDefectEndpoints();
 app.MapTicketEndpoints();

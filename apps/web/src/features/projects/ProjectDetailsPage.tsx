@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Trash2, Users, Server } from 'lucide-react';
+import { Pencil, Trash2, Users, Server, KeyRound } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -109,6 +109,12 @@ export function ProjectDetailsPage() {
               <Button variant="secondary" size="sm">
                 <Server className="h-4 w-4" aria-hidden />
                 Environments
+              </Button>
+            </Link>
+            <Link to={`/projects/${p.id}/variables`}>
+              <Button variant="secondary" size="sm">
+                <KeyRound className="h-4 w-4" aria-hidden />
+                Variables
               </Button>
             </Link>
             {p.status === 'Active' && (

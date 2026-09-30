@@ -6,7 +6,10 @@ public sealed record StartExecutionBody(
     Guid? TestCaseVersionId,
     Guid? EnvironmentId,
     string? Browser,
-    string? IdempotencyKey);
+    string? IdempotencyKey,
+    Guid? SuiteId,
+    Dictionary<string, string>? VariableOverrides,
+    Dictionary<string, string>? SecretRefOverrides);
 
 /// <summary>
 /// Execution control-plane surface (docs/06 §8). All routes require
@@ -30,7 +33,10 @@ public static class ExecutionEndpoints
                     body?.TestCaseVersionId ?? Guid.Empty,
                     body?.EnvironmentId,
                     body?.Browser,
-                    body?.IdempotencyKey), ct);
+                    body?.IdempotencyKey,
+                    body?.SuiteId,
+                    body?.VariableOverrides,
+                    body?.SecretRefOverrides), ct);
                 return result.Duplicated
                     ? Results.Ok(result)
                     : Results.Accepted($"/api/v1/projects/{projectId}/executions/{result.ExecutionId}", result);

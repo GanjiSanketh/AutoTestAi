@@ -21,6 +21,8 @@ public static class Permissions
     public const string TicketsCreate = "tickets.create";
     public const string ReportsRead = "reports.read";
     public const string SettingsManage = "settings.manage";
+    public const string VariablesManage = "variables.manage";
+    public const string SecretsManage = "secrets.manage";
 
     public static IReadOnlyList<string> All { get; } = new[]
     {
@@ -30,5 +32,6 @@ public static class Permissions
         BugsRead, BugsManage,
         TicketsRead, TicketsCreate,
         ReportsRead, SettingsManage,
+        VariablesManage, SecretsManage,
     };
 }
