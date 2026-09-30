@@ -95,6 +95,113 @@ public sealed class ReportService : IReportService
         return new PagedResult<TicketReportItem>(result.Items, result.TotalCount, pageNumber, size);
     }
 
+    // ---------- test-level flakiness (Slice 12; deterministic, read-only) ----------
+
+    public async Task<PagedResult<FlakyTestDto>> GetFlakyTestsAsync(
+        Guid projectId, ReportDateRange range, FlakyTestsFilters filters,
+        string? sort, bool descending, int page, int pageSize, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(range);
+        ArgumentNullException.ThrowIfNull(filters);
+        await _authorization.RequireProjectAccessAsync(projectId, Permissions.ReportsRead, ct);
+        var normalized = NormalizeFilters(filters);
+        var sortKey = NormalizeSort(sort);
+        var (skip, take, pageNumber, size) = Paginate(page, pageSize);
+        var candidates = await LoadCandidatesAsync(projectId, range, ct);
+        var filtered = FlakyReportShaper.ApplyFilters(candidates, normalized);
+        var sorted = FlakyReportShaper.ApplySort(filtered, sortKey, descending);
+        var pageIds = sorted.Skip(skip).Take(take).Select(c => c.TestCaseId).ToList();
+        var lastRuns = (await _store.GetTestLastRunsAsync(projectId, range, pageIds, ct))
+            .ToDictionary(r => r.TestCaseId, r => r);
+        var items = sorted.Skip(skip).Take(take)
+            .Select(c => MapFlakyTest(c, lastRuns.TryGetValue(c.TestCaseId, out var last) ? last : null))
+            .ToList();
+        return new PagedResult<FlakyTestDto>(items, filtered.Count, pageNumber, size);
+    }
+
+    public async Task<FlakyTestsExport> ExportFlakyTestsCsvAsync(
+        Guid projectId, ReportDateRange range, FlakyTestsFilters filters,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(range);
+        ArgumentNullException.ThrowIfNull(filters);
+        await _authorization.RequireProjectAccessAsync(projectId, Permissions.ReportsRead, ct);
+        var normalized = NormalizeFilters(filters);
+        var candidates = await LoadCandidatesAsync(projectId, range, ct);
+        // Bounded deterministic export: same filters, TestKey order, hard cap.
+        var filtered = FlakyReportShaper.ApplyFilters(candidates, normalized);
+        var sorted = FlakyReportShaper.ApplySort(filtered, "testKey", descending: false);
+        var capped = sorted.Take(5000).ToList();
+        var pageIds = capped.Select(c => c.TestCaseId).ToList();
+        var lastRuns = (await _store.GetTestLastRunsAsync(projectId, range, pageIds, ct))
+            .ToDictionary(r => r.TestCaseId, r => r);
+        var rows = capped
+            .Select(c => MapFlakyTest(c, lastRuns.TryGetValue(c.TestCaseId, out var last) ? last : null))
+            .ToList();
+        var fileName = $"flakiness-{projectId:N}-{range.From:yyyyMMdd}-{range.To:yyyyMMdd}.csv";
+        return new FlakyTestsExport(fileName, "text/csv", CsvExporter.ExportFlakyTests(rows));
+    }
+
+    private async Task<IReadOnlyList<FlakyCandidate>> LoadCandidatesAsync(
+        Guid projectId, ReportDateRange range, CancellationToken ct)
+    {
+        var outcomes = await _store.GetTestOutcomeRowsAsync(projectId, range, ct);
+        if (outcomes.Count == 0) return Array.Empty<FlakyCandidate>();
+        var healing = (await _store.GetTestHealingRowsAsync(projectId, range, ct))
+            .ToDictionary(h => h.TestCaseId, h => h);
+        var meta = (await _store.GetTestCaseMetaAsync(
+                projectId, outcomes.Select(o => o.TestCaseId).ToList(), ct))
+            .ToDictionary(m => m.TestCaseId, m => m);
+        var candidates = new List<FlakyCandidate>(outcomes.Count);
+        foreach (var outcome in outcomes)
+        {
+            // Project predicate is enforced store-side; a missing meta row
+            // (deleted case) is skipped rather than surfaced without identity.
+            if (!meta.TryGetValue(outcome.TestCaseId, out var m)) continue;
+            healing.TryGetValue(outcome.TestCaseId, out var h);
+            candidates.Add(new FlakyCandidate(
+                outcome.TestCaseId, m.TestKey, m.Title, m.Module, m.Priority,
+                m.Framework, m.Platform,
+                outcome.Passed, outcome.Failed, outcome.Other, outcome.LastRunAt,
+                h?.Attempts ?? 0, h?.Applied ?? 0));
+        }
+        return candidates;
+    }
+
+    private static FlakyTestDto MapFlakyTest(FlakyCandidate candidate, TestLastRunRow? last)
+        => new(candidate.TestCaseId, candidate.TestKey, candidate.Title,
+            candidate.Module, candidate.Priority, candidate.Framework, candidate.Platform,
+            candidate.TotalExecutions, candidate.Passed, candidate.Failed, candidate.Other,
+            candidate.IsFlaky, candidate.FlakinessRate,
+            last?.Status, candidate.LastRunAt,
+            candidate.HealingAttempts, candidate.HealedRuns);
+
+    private static FlakyTestsFilters NormalizeFilters(FlakyTestsFilters filters)
+    {
+        if (!string.IsNullOrWhiteSpace(filters.Priority))
+            ValidateEnum(filters.Priority, Priorities, "priority", "Priority must be 'Critical', 'High', 'Medium' or 'Low'.");
+        return new FlakyTestsFilters(
+            string.IsNullOrWhiteSpace(filters.Search) ? null : filters.Search.Trim(),
+            filters.FlakyOnly,
+            Math.Max(0, filters.MinExecutions),
+            Normalize(filters.Module),
+            Normalize(filters.Priority),
+            Normalize(filters.Framework),
+            filters.HealedOnly);
+    }
+
+    private static string NormalizeSort(string? sort)
+    {
+        var key = string.IsNullOrWhiteSpace(sort) ? FlakyReportShaper.DefaultSort : sort.Trim();
+        if (!FlakyReportShaper.SortKeys.Contains(key))
+            throw new ValidationException("Sort must be one of 'testKey', 'title', 'executions', 'flakinessRate', 'lastRun'.",
+                new[] { new FieldError("sort", "Sort must be one of 'testKey', 'title', 'executions', 'flakinessRate', 'lastRun'.") });
+        return key;
+    }
+
+    private static readonly IReadOnlySet<string> Priorities =
+        new HashSet<string>(Enum.GetNames<Priority>(), StringComparer.OrdinalIgnoreCase);
+
     private static (int Skip, int Take, int Page, int Size) Paginate(int page, int pageSize)
     {
         page = Math.Max(1, page);

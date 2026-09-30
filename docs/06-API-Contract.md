@@ -94,6 +94,63 @@ Semantics:
 
 Dashboard values must come from persisted backend data, not hardcoded demo values.
 
+### 4.1 Executive Analytics (Phase 2 Slice 12)
+
+Deterministic historical analytics over existing tables (no new tables).
+Same project scoping, UTC date-range rules, and permission model as above:
+dashboard routes require `dashboard.read`, report/export routes require
+`reports.read`. Null means insufficient data (never a misleading zero).
+
+```http
+GET /api/v1/projects/{projectId}/dashboard/executive-overview?from=&to=
+GET /api/v1/projects/{projectId}/dashboard/flakiness-trend?from=&to=&granularity=
+GET /api/v1/projects/{projectId}/dashboard/healing?from=&to=
+GET /api/v1/projects/{projectId}/dashboard/durations?from=&to=
+GET /api/v1/projects/{projectId}/dashboard/readiness?from=&to=
+GET /api/v1/projects/{projectId}/reports/flakiness?from=&to=&search=&flakyOnly=&minExecutions=&module=&priority=&framework=&healedOnly=&sort=&descending=&page=&pageSize=
+GET /api/v1/projects/{projectId}/reports/flakiness/export?from=&to=&search=&flakyOnly=&minExecutions=&module=&priority=&framework=&healedOnly=
+```
+
+Scales: `passRate`/`failRate` are 0-1 ratios (Slice 8 convention);
+`flakinessIndex`, `flakinessRate`, `automationCoverage`, `releaseReadiness`,
+component values, `defectsPer100Executions`, `healingSuccessRate` are 0-100.
+
+Semantics:
+
+- One logical execution = one Execution row (engine infra-retries reuse the
+  execution, so retries never double-count). Verdicts: Passed/Failed;
+  Cancelled excluded; TimedOut/Error reported as unstable (neither
+  flaky-making nor flaky-blocking); Queued/Running excluded.
+- Flaky test = >=1 Passed AND >=1 Failed in the window (always-failing is
+  failure-prone, always-passing is not flaky). Test rate =
+  100*min(P,F)/(P+F), null when <2 verdicts. Project index =
+  100*flaky/eligible(>=2 verdicts), null when empty. Trend buckets are
+  daily (weekly rollup past 62 days); a null bucket index means no data.
+- Automation coverage = 100*(non-archived cases with latest version
+  Approved)/(non-archived cases), null when empty.
+- Release readiness (0-100, informational only, never an AI decision): 35%
+  pass rate + 20% flakiness health (100-index) + 15% coverage + 15% defect
+  health (max(0,100-25*open Critical/High)) + 15% completion health
+  (terminal/total); unknown components excluded with renormalized weights;
+  null when pass rate unknown. Bands: >=80 Ready, >=60 Caution, else
+  NeedsAttention. Every component exposes value, weight, contribution,
+  threshold, and detail.
+- Defect density proxy = 100*(defects created in window)/(terminal
+  executions), null when empty (creation-date based).
+- Durations use valid samples only (non-null, >=0ms): count/avg/min/max/total
+  server-side; p50/p90 over a capped (50000) sorted fetch; daily averages.
+  No SLA targets exist in the domain: `slaConfigured` is false and
+  open-defect aging (<7d/7-30d/>30d) is reported instead.
+- Healing reuses Slice 11 rows: attempts/applied/failed, deterministic vs
+  AI-assisted split, success = 100*applied/attempts, distinct tests and
+  executions, daily trend, and a neutral healed-and-flaky co-occurrence
+  count (no causal claims, no prediction).
+- Flakiness report sorting allowlist: `testKey`, `title`, `executions`,
+  `flakinessRate`, `lastRun` (nulls last, TestKey tiebreak); anything else
+  returns `400`. Deleted test cases are skipped, never surfaced blind.
+- CSV export (`text/csv`, attachment): same filters, TestKey order, max 5000
+  rows, RFC-4180 quoting, safe columns only (no secrets, logs, or evidence).
+
 ## 5. Projects
 
 Implemented in Phase 1 Slice 2. List returns only accessible projects

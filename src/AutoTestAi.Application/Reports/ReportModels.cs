@@ -241,6 +241,26 @@ public interface IDashboardService
     Task<DefectOverviewDto> GetDefectOverviewAsync(Guid projectId, ReportDateRange range, CancellationToken ct);
 
     Task<TicketOverviewDto> GetTicketOverviewAsync(Guid projectId, ReportDateRange range, CancellationToken ct);
+
+    /// <summary>
+    /// Executive analytics (Slice 12): pass/fail ratios, flakiness index,
+    /// automation coverage, release readiness, defect density, durations and
+    /// healing — all deterministic over persisted data, never AI.
+    /// </summary>
+    Task<ExecutiveAnalyticsDto> GetExecutiveOverviewAsync(
+        Guid projectId, ReportDateRange range, CancellationToken ct);
+
+    Task<FlakinessTrendDto> GetFlakinessTrendAsync(
+        Guid projectId, ReportDateRange range, string? granularity, CancellationToken ct);
+
+    Task<HealingAnalyticsDto> GetHealingAnalyticsAsync(
+        Guid projectId, ReportDateRange range, CancellationToken ct);
+
+    Task<DurationAnalyticsDto> GetDurationAnalyticsAsync(
+        Guid projectId, ReportDateRange range, CancellationToken ct);
+
+    Task<ReleaseReadinessDto> GetReleaseReadinessAsync(
+        Guid projectId, ReportDateRange range, CancellationToken ct);
 }
 
 /// <summary>Read-only operational reports (Slice 8). Paginated, server-side filtered.</summary>
@@ -257,4 +277,14 @@ public interface IReportService
     Task<PagedResult<TicketReportItem>> GetTicketsAsync(
         Guid projectId, ReportDateRange range, TicketReportFilters filters,
         int page, int pageSize, CancellationToken ct);
+
+    /// <summary>Test-level flakiness report (Slice 12): server-side filtered/sorted/paginated.</summary>
+    Task<PagedResult<FlakyTestDto>> GetFlakyTestsAsync(
+        Guid projectId, ReportDateRange range, FlakyTestsFilters filters,
+        string? sort, bool descending, int page, int pageSize, CancellationToken ct);
+
+    /// <summary>Bounded CSV export of the flaky-tests report (safe fields only).</summary>
+    Task<FlakyTestsExport> ExportFlakyTestsCsvAsync(
+        Guid projectId, ReportDateRange range, FlakyTestsFilters filters,
+        CancellationToken ct);
 }

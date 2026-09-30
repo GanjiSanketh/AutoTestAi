@@ -277,6 +277,58 @@ logging, or audit; the worker never holds provider keys (AI resolves
 server-side via the existing provider abstraction). Normal passing
 steps pay no healing overhead (no per-step DB/AI/DOM work).
 
+Slice-12 executive analytics & flakiness (Phase 2, deterministic history):
+
+```text
+PostgreSQL (Slices 1–11 tables, no new tables)
+  → IReportQueryStore extensions (server-side grouped aggregates only)
+  → AnalyticsCalculations (pure formulas) + DashboardService/ReportService
+  → dashboard/* + reports/flakiness* endpoints (project-scoped, bounded ranges)
+  → React ExecutiveSection + FlakinessReportTab (ECharts + table fallbacks)
+```
+
+Metric specification (all UTC, window-scoped, reproducible):
+
+- One logical execution = one Execution row (the engine's single infra
+  retry reuses the execution, so retries never double-count). Verdicts:
+  Passed/Failed; Cancelled excluded; TimedOut/Error reported as unstable
+  (neither flaky-making nor flaky-blocking); Queued/Running excluded.
+- Pass rate = Passed ÷ terminal (Slice 8 convention), null when empty.
+- Flaky test = ≥1 Passed AND ≥1 Failed in the window (always-failing is
+  failure-prone, always-passing is not flaky). Test rate =
+  100·min(P,F)/(P+F), null when <2 verdicts. Project index =
+  100·flaky/eligible(≥2 verdicts), null (insufficient data, never zero)
+  when no test qualifies.
+- Trend buckets are daily (weekly rollup past 62 days); a null bucket
+  index means no data, never zero.
+- Automation coverage = 100·(non-archived cases with latest version
+  Approved)/(non-archived cases), null when empty.
+- Release readiness (0–100, informational only): 35% pass rate + 20%
+  flakiness health (100−index) + 15% coverage + 15% defect health
+  (max(0,100−25·open Critical/High)) + 15% completion health
+  (terminal÷total); unknown components excluded with renormalized
+  weights; null when pass rate unknown. Bands: ≥80 Ready, ≥60 Caution,
+  else NeedsAttention. No LLM, no autonomous decisions.
+- Defect density proxy = 100·(defects created in window)/(terminal
+  executions), null when empty (creation-date based, documented).
+- Durations over valid samples (non-null, ≥0ms): count/avg/min/max/total
+  server-side; p50/p90 in memory over a capped (50k) sorted fetch; daily
+  averages. No SLA targets exist in the domain, so `slaConfigured` is
+  false and open-defect aging (<7d/7–30d/>30d) is reported instead.
+- Healing success = 100·applied/attempts (Slice 11 Applied+WasApplied
+  semantics), null when empty; deterministic vs AI-assisted split;
+  healing-alongside-flaky counts are co-occurrence only ("observed
+  alongside"), never causal claims. No predictive analytics (Phase 4).
+
+Query rules: project predicate + CreatedAt window on every query; two
+composite indexes (`IX_executions_Project_Created`,
+`IX_healing_Project_Created`) support the range scans; grouped
+aggregates stay in the database (EF LINQ, parameterized, sort
+allowlists); per-test shaping and paging happen over grouped rows
+(never raw history to the browser); flakiness CSV export is capped at
+5000 rows, deterministic TestKey order, safe fields only. Dashboard
+reads need `dashboard.read`, reports/exports need `reports.read`.
+
 ## 6. AI Provider Abstraction
 
 Business modules depend on an internal abstraction, not vendor SDKs.

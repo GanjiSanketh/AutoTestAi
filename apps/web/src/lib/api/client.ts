@@ -77,6 +77,21 @@ export async function apiRequest<T>(
   return (await response.json()) as T;
 }
 
+/** Authenticated binary download (CSV exports); errors surface as ApiError. */
+export async function apiDownload(path: string): Promise<{ blob: Blob; fileName: string }> {
+  const token = await getAccessToken();
+  const headers = new Headers();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(`${BASE_URL}${path}`, { method: 'GET', headers });
+  if (response.status === 401 && unauthorizedHandler) {
+    unauthorizedHandler(response.status, path);
+  }
+  if (!response.ok) await parseError(response);
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const match = /filename="?([^";]+)"?/.exec(disposition);
+  return { blob: await response.blob(), fileName: match?.[1] ?? 'export.csv' };
+}
+
 export const api = {
   get: <T>(path: string) => apiRequest<T>(path, { method: 'GET' }),
   post: <T>(path: string, body?: unknown) =>
@@ -84,4 +99,5 @@ export const api = {
   put: <T>(path: string, body?: unknown) =>
     apiRequest<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
   delete: <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' }),
+  download: (path: string) => apiDownload(path),
 };

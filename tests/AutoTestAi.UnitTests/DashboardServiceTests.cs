@@ -20,6 +20,20 @@ internal sealed class FakeReportQueryStore : IReportQueryStore
     public List<RecentDefectItem> RecentDefects = new();
     public List<RecentTicketItem> RecentTickets = new();
     public List<ActivityItem> Activity = new();
+    public List<TestOutcomeRow> OutcomeRows = new();
+    public List<TestDayOutcomeRow> DayOutcomeRows = new();
+    public List<TestHealingRow> HealingRows = new();
+    public List<TestCaseMetaRow> MetaRows = new();
+    public List<TestLastRunRow> LastRuns = new();
+    public CoverageCounts CoverageValue = new(0, 0);
+    public int OpenCritHighValue;
+    public int DefectsCreatedValue;
+    public List<NamedCount> AgingBuckets = new();
+    public DurationStats DurationStatsValue = new(0, null, null, null, null);
+    public List<long> DurationsCapped = new();
+    public List<DurationDayRow> DurationDays = new();
+    public HealingStats HealingStatsValue = new(0, 0, 0, 0, 0, 0);
+    public List<HealingDayRow> HealingDays = new();
     public Func<Guid, ReportDateRange, ExecutionReportFilters, int, int, CancellationToken, Task<PagedResult<ExecutionReportItem>>>? ExecQuery;
     public Func<Guid, ReportDateRange, DefectReportFilters, int, int, CancellationToken, Task<PagedResult<DefectReportItem>>>? DefectQuery;
     public Func<Guid, ReportDateRange, TicketReportFilters, int, int, CancellationToken, Task<PagedResult<TicketReportItem>>>? TicketQuery;
@@ -43,6 +57,34 @@ internal sealed class FakeReportQueryStore : IReportQueryStore
         => DefectQuery is null ? Task.FromResult(new PagedResult<DefectReportItem>(Array.Empty<DefectReportItem>(), 0, 0, 0)) : DefectQuery(p, r, f, s, t, ct);
     public Task<PagedResult<TicketReportItem>> QueryTicketsAsync(Guid p, ReportDateRange r, TicketReportFilters f, int s, int t, CancellationToken ct)
         => TicketQuery is null ? Task.FromResult(new PagedResult<TicketReportItem>(Array.Empty<TicketReportItem>(), 0, 0, 0)) : TicketQuery(p, r, f, s, t, ct);
+    public Task<IReadOnlyList<TestOutcomeRow>> GetTestOutcomeRowsAsync(Guid p, ReportDateRange r, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<TestOutcomeRow>>(OutcomeRows);
+    public Task<IReadOnlyList<TestDayOutcomeRow>> GetTestDayOutcomeRowsAsync(Guid p, ReportDateRange r, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<TestDayOutcomeRow>>(DayOutcomeRows);
+    public Task<IReadOnlyList<TestLastRunRow>> GetTestLastRunsAsync(Guid p, ReportDateRange r, IReadOnlyList<Guid> ids, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<TestLastRunRow>>(LastRuns.Where(x => ids.Contains(x.TestCaseId)).ToList());
+    public Task<IReadOnlyList<TestHealingRow>> GetTestHealingRowsAsync(Guid p, ReportDateRange r, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<TestHealingRow>>(HealingRows);
+    public Task<CoverageCounts> GetCoverageCountsAsync(Guid p, CancellationToken ct)
+        => Task.FromResult(CoverageValue);
+    public Task<int> GetOpenCriticalHighDefectCountAsync(Guid p, CancellationToken ct)
+        => Task.FromResult(OpenCritHighValue);
+    public Task<int> GetDefectsCreatedCountAsync(Guid p, ReportDateRange r, CancellationToken ct)
+        => Task.FromResult(DefectsCreatedValue);
+    public Task<IReadOnlyList<NamedCount>> GetOpenDefectAgingAsync(Guid p, ReportDateRange r, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<NamedCount>>(AgingBuckets);
+    public Task<DurationStats> GetDurationStatsAsync(Guid p, ReportDateRange r, CancellationToken ct)
+        => Task.FromResult(DurationStatsValue);
+    public Task<IReadOnlyList<long>> GetDurationsCappedAsync(Guid p, ReportDateRange r, int cap, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<long>>(DurationsCapped.Take(cap).ToList());
+    public Task<IReadOnlyList<DurationDayRow>> GetDurationByDayAsync(Guid p, ReportDateRange r, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<DurationDayRow>>(DurationDays);
+    public Task<HealingStats> GetHealingStatsAsync(Guid p, ReportDateRange r, CancellationToken ct)
+        => Task.FromResult(HealingStatsValue);
+    public Task<IReadOnlyList<HealingDayRow>> GetHealingByDayAsync(Guid p, ReportDateRange r, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<HealingDayRow>>(HealingDays);
+    public Task<IReadOnlyList<TestCaseMetaRow>> GetTestCaseMetaAsync(Guid p, IReadOnlyList<Guid> ids, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<TestCaseMetaRow>>(MetaRows.Where(m => ids.Contains(m.TestCaseId)).ToList());
 }
 
 internal sealed class FixedClock : IDateTimeProvider

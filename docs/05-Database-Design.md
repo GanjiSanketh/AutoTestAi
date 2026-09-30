@@ -123,6 +123,15 @@ stale workers are fenced by `assignment_id` against the live lease.
 Evidence retention is bounded by construction: only redacted locator
 pairs and counts persist (no DOM, no screenshots per candidate).
 
+Slice 12 adds no tables: analytics compute from the tables above.
+One index-only migration adds `IX_executions_Project_Created`
+(`executions(project_id,created_at)`) for every window range predicate
+(Slice 8 history plus Slice 12 verdict/duration aggregates) and
+`IX_healing_Project_Created`
+(`self_healing_attempts(project_id,created_at)`) for healing window
+queries. No other indexes were justified: defects, test cases, and
+execution-test joins reuse existing indexes.
+
 ## 5. JSONB
 
 Use JSONB for variable structures such as structured test steps, AI metadata, execution metadata, evidence and provider-specific integration configuration. Core queryable business fields remain relational.

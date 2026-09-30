@@ -13,6 +13,7 @@ import { useProfile } from '../../lib/auth/useProfile';
 import { Permissions, hasPermission } from '../../lib/auth/permissions';
 import { useAppStore } from '../../stores/useAppStore';
 import { defectStatusTone, severityTone } from '../bugs/DefectsListPage';
+import { ExecutiveSection } from './ExecutiveSection';
 
 type Preset = '7' | '30' | '90' | 'custom';
 
@@ -406,6 +407,8 @@ export function DashboardPage() {
               </CardContent>
             </Card>
           </div>
+
+          <ExecutiveSection projectId={projectId} range={range} enabled={enabled} />
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <Card>

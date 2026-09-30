@@ -82,6 +82,20 @@ contracts preserved. No autonomous test maintenance, predictive
 flakiness, self-authoring tests, mobile/API/visual healing, selector
 commits, arbitrary code execution, or new workflow/transport systems.
 
+### Phase 2 — Slice 12: Executive Analytics & Flakiness Metrics (implemented, Slice 12)
+Deterministic historical analytics over existing tables (no new tables;
+one index-only migration): executive overview (pass/fail, flakiness
+index, automation coverage, release readiness, defect density,
+durations, healing), daily/weekly flakiness trend, paginated
+test-level flakiness report with deterministic sorting, duration
+percentiles/trend plus open-defect aging (no SLA config exists, so no
+invented targets), self-healing outcomes with neutral
+healing-alongside-flaky correlation, and a bounded CSV export. All
+formulas documented and unit-tested; dashboard reads need
+`dashboard.read`, reports/exports need `reports.read`. No predictive
+flakiness, no AI decisions, no autonomous maintenance, no CI/CD, no
+mobile/visual work.
+
 ## 3. Definition of Done
 
 A feature is complete only when its backend endpoint, authorization, validation, migration, frontend integration, loading/empty/error states, tests, OpenAPI update and security/audit considerations are present. No production-looking hardcoded data remains.

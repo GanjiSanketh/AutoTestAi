@@ -122,6 +122,186 @@ public sealed class DashboardService : IDashboardService
             throw new ValidationException("Status filter is invalid.",
                 new[] { new FieldError("status", "Status must be a valid execution status.") });
     }
+
+    // ---------- executive analytics (Slice 12; deterministic, read-only) ----------
+
+    public async Task<ExecutiveAnalyticsDto> GetExecutiveOverviewAsync(
+        Guid projectId, ReportDateRange range, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(range);
+        await _authorization.RequireProjectAccessAsync(projectId, Permissions.DashboardRead, ct);
+
+        var kpis = await _store.GetExecutionKpisAsync(projectId, range, ct);
+        var outcomes = await _store.GetTestOutcomeRowsAsync(projectId, range, ct);
+        var coverage = await _store.GetCoverageCountsAsync(projectId, ct);
+        var openCritHigh = await _store.GetOpenCriticalHighDefectCountAsync(projectId, ct);
+        var defectsCreated = await _store.GetDefectsCreatedCountAsync(projectId, range, ct);
+        var durations = await _store.GetDurationStatsAsync(projectId, range, ct);
+        var healing = await _store.GetHealingStatsAsync(projectId, range, ct);
+
+        var terminal = kpis.Passed + kpis.Failed + kpis.Cancelled + kpis.TimedOut + kpis.Error;
+        var passRate = AnalyticsCalculations.PassRate(kpis.Passed, terminal);
+        var failRate = terminal == 0 ? null : (double?)kpis.Failed / terminal;
+
+        var flaky = outcomes.Count(o => AnalyticsCalculations.IsFlaky(o.Passed, o.Failed));
+        var eligible = outcomes.Count(o => o.Passed + o.Failed >= AnalyticsCalculations.MinVerdictsForFlakiness);
+        var index = AnalyticsCalculations.FlakinessIndex(flaky, eligible);
+
+        var coverageValue = AnalyticsCalculations.AutomationCoverage(coverage.AutomatedCases, coverage.EligibleCases);
+        var (score, status, components, _) = LoadReadiness(
+            kpis, outcomes, coverage, openCritHigh);
+
+        return new ExecutiveAnalyticsDto(
+            projectId, range.From, range.To,
+            terminal, kpis.Total,
+            passRate, failRate,
+            index, flaky, eligible,
+            coverageValue, coverage.AutomatedCases, coverage.EligibleCases,
+            score, status, components,
+            openCritHigh,
+            AnalyticsCalculations.DefectsPer100Executions(defectsCreated, terminal),
+            defectsCreated,
+            coverage.AutomatedCases == 0
+                ? null
+                : (double?)(await _store.GetDefectKpisAsync(projectId, range, ct)).Total / coverage.AutomatedCases,
+            durations.AverageMs, durations.TotalMs, durations.Count,
+            AnalyticsCalculations.HealingSuccessRate(healing.Applied, healing.Attempts),
+            healing.Attempts, healing.Applied,
+            kpis.TimedOut + kpis.Error, kpis.Cancelled);
+    }
+
+    public async Task<FlakinessTrendDto> GetFlakinessTrendAsync(
+        Guid projectId, ReportDateRange range, string? granularity, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(range);
+        await _authorization.RequireProjectAccessAsync(projectId, Permissions.DashboardRead, ct);
+        var mode = NormalizeGranularity(granularity, range);
+        var rows = await _store.GetTestDayOutcomeRowsAsync(projectId, range, ct);
+        var daily = FlakinessTrendBuilder.BuildDaily(range, rows);
+        var points = string.Equals(mode, "week", StringComparison.OrdinalIgnoreCase)
+            ? FlakinessTrendBuilder.RollupWeekly(daily)
+            : daily;
+        return new FlakinessTrendDto(projectId, range.From, range.To, mode, points);
+    }
+
+    public async Task<HealingAnalyticsDto> GetHealingAnalyticsAsync(
+        Guid projectId, ReportDateRange range, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(range);
+        await _authorization.RequireProjectAccessAsync(projectId, Permissions.DashboardRead, ct);
+        var stats = await _store.GetHealingStatsAsync(projectId, range, ct);
+        var byDay = await _store.GetHealingByDayAsync(projectId, range, ct);
+        var outcomes = await _store.GetTestOutcomeRowsAsync(projectId, range, ct);
+        var healingRows = await _store.GetTestHealingRowsAsync(projectId, range, ct);
+        var flakyIds = new HashSet<Guid>(outcomes
+            .Where(o => AnalyticsCalculations.IsFlaky(o.Passed, o.Failed))
+            .Select(o => o.TestCaseId));
+        // Historical co-occurrence only ("observed alongside"): neutral wording,
+        // no causal claim — predictive correlation belongs to Phase 4.
+        var correlated = healingRows.Count(h => flakyIds.Contains(h.TestCaseId));
+        return new HealingAnalyticsDto(
+            projectId, range.From, range.To,
+            stats.Attempts, stats.Applied, stats.Attempts - stats.Applied,
+            stats.Deterministic, stats.AiAssisted,
+            AnalyticsCalculations.HealingSuccessRate(stats.Applied, stats.Attempts),
+            stats.TestsWithHealing, stats.ExecutionsWithHealing,
+            correlated,
+            BuildHealingTrend(range, byDay));
+    }
+
+    public async Task<DurationAnalyticsDto> GetDurationAnalyticsAsync(
+        Guid projectId, ReportDateRange range, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(range);
+        await _authorization.RequireProjectAccessAsync(projectId, Permissions.DashboardRead, ct);
+        var stats = await _store.GetDurationStatsAsync(projectId, range, ct);
+        var capped = await _store.GetDurationsCappedAsync(projectId, range, 50000, ct);
+        var byDay = await _store.GetDurationByDayAsync(projectId, range, ct);
+        var aging = await _store.GetOpenDefectAgingAsync(projectId, range, ct);
+        return new DurationAnalyticsDto(
+            projectId, range.From, range.To,
+            stats.Count, stats.AverageMs, stats.MinMs, stats.MaxMs, stats.TotalMs,
+            AnalyticsCalculations.Percentile(capped, 50),
+            AnalyticsCalculations.Percentile(capped, 90),
+            false,
+            aging.Select(a => new AgingBucketDto(a.Name, a.Count)).ToList(),
+            BuildDurationTrend(range, byDay));
+    }
+
+    public async Task<ReleaseReadinessDto> GetReleaseReadinessAsync(
+        Guid projectId, ReportDateRange range, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(range);
+        await _authorization.RequireProjectAccessAsync(projectId, Permissions.DashboardRead, ct);
+        var (score, status, components, terminal) = await LoadReadinessAsync(projectId, range, ct);
+        return new ReleaseReadinessDto(projectId, range.From, range.To, score, status, components, terminal);
+    }
+
+    internal async Task<(double? Score, string Status, IReadOnlyList<ReadinessComponentDto> Components, int Terminal)>
+        LoadReadinessAsync(Guid projectId, ReportDateRange range, CancellationToken ct)
+    {
+        var kpis = await _store.GetExecutionKpisAsync(projectId, range, ct);
+        var outcomes = await _store.GetTestOutcomeRowsAsync(projectId, range, ct);
+        var coverage = await _store.GetCoverageCountsAsync(projectId, ct);
+        var openCritHigh = await _store.GetOpenCriticalHighDefectCountAsync(projectId, ct);
+        return LoadReadiness(kpis, outcomes, coverage, openCritHigh);
+    }
+
+    private static (double? Score, string Status, IReadOnlyList<ReadinessComponentDto> Components, int Terminal)
+        LoadReadiness(
+            ExecutionKpis kpis, IReadOnlyList<TestOutcomeRow> outcomes,
+            CoverageCounts coverage, int openCritHigh)
+    {
+        var terminal = kpis.Passed + kpis.Failed + kpis.Cancelled + kpis.TimedOut + kpis.Error;
+        var flaky = outcomes.Count(o => AnalyticsCalculations.IsFlaky(o.Passed, o.Failed));
+        var eligible = outcomes.Count(o => o.Passed + o.Failed >= AnalyticsCalculations.MinVerdictsForFlakiness);
+        var (score, status, components) = AnalyticsCalculations.ReleaseReadiness(
+            AnalyticsCalculations.PassRate(kpis.Passed, terminal),
+            AnalyticsCalculations.FlakinessIndex(flaky, eligible),
+            AnalyticsCalculations.AutomationCoverage(coverage.AutomatedCases, coverage.EligibleCases),
+            openCritHigh,
+            kpis.Total == 0 ? null : (double?)terminal / kpis.Total,
+            terminal);
+        return (score, status, components, terminal);
+    }
+
+    private static IReadOnlyList<HealingTrendPointDto> BuildHealingTrend(
+        ReportDateRange range, IReadOnlyList<HealingDayRow> rows)
+    {
+        var byDay = rows.ToDictionary(
+            r => new DateTime(r.Year, r.Month, r.Day, 0, 0, 0, DateTimeKind.Utc),
+            r => r);
+        var points = new List<HealingTrendPointDto>();
+        var start = StartOfDayUtc(range.From);
+        for (var day = start; day <= StartOfDayUtc(range.To); day = day.AddDays(1))
+        {
+            points.Add(byDay.TryGetValue(day, out var row)
+                ? new HealingTrendPointDto(day.ToString("yyyy-MM-dd"), row.Attempts, row.Applied)
+                : new HealingTrendPointDto(day.ToString("yyyy-MM-dd"), 0, 0));
+        }
+        return points;
+    }
+
+    private static IReadOnlyList<DurationTrendPointDto> BuildDurationTrend(
+        ReportDateRange range, IReadOnlyList<DurationDayRow> rows)
+    {
+        var byDay = rows.ToDictionary(
+            r => new DateTime(r.Year, r.Month, r.Day, 0, 0, 0, DateTimeKind.Utc),
+            r => r);
+        var points = new List<DurationTrendPointDto>();
+        var start = StartOfDayUtc(range.From);
+        for (var day = start; day <= StartOfDayUtc(range.To); day = day.AddDays(1))
+        {
+            points.Add(byDay.TryGetValue(day, out var row)
+                ? new DurationTrendPointDto(day.ToString("yyyy-MM-dd"), row.Count, row.AverageMs)
+                : new DurationTrendPointDto(day.ToString("yyyy-MM-dd"), 0, null));
+        }
+        return points;
+    }
+
+    private static DateTime StartOfDayUtc(DateTimeOffset value)
+        => new(value.UtcDateTime.Year, value.UtcDateTime.Month, value.UtcDateTime.Day,
+            0, 0, 0, DateTimeKind.Utc);
 }
 
 /// <summary>Deterministic UTC bucket builder shared by trend shaping (pure, unit-tested).</summary>

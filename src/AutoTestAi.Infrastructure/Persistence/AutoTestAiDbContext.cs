@@ -86,6 +86,11 @@ public sealed class AutoTestAiDbContext : DbContext
         // --- execution ---
         modelBuilder.Entity<Execution>().ToTable("executions");
         modelBuilder.Entity<Execution>().HasIndex(e => new { e.ProjectId, e.Status });
+        // Slice 12: every analytics/execution-history range predicate filters
+        // (ProjectId, CreatedAt); the composite keeps window scans index-only.
+        modelBuilder.Entity<Execution>()
+            .HasIndex(e => new { e.ProjectId, e.CreatedAt })
+            .HasDatabaseName("IX_executions_Project_Created");
         modelBuilder.Entity<Execution>()
             .HasIndex(e => new { e.ProjectId, e.IdempotencyKey })
             .IsUnique()
@@ -218,6 +223,10 @@ public sealed class AutoTestAiDbContext : DbContext
         modelBuilder.Entity<SelfHealingPolicy>().Property(p => p.AllowedStrategies).HasMaxLength(200);
         modelBuilder.Entity<SelfHealingAttempt>().ToTable("self_healing_attempts");
         modelBuilder.Entity<SelfHealingAttempt>().HasIndex(a => a.ProjectId);
+        // Slice 12: healing analytics filter (ProjectId, CreatedAt) windows.
+        modelBuilder.Entity<SelfHealingAttempt>()
+            .HasIndex(a => new { a.ProjectId, a.CreatedAt })
+            .HasDatabaseName("IX_healing_Project_Created");
         modelBuilder.Entity<SelfHealingAttempt>().HasIndex(a => a.ExecutionId);
         modelBuilder.Entity<SelfHealingAttempt>().HasIndex(a => a.TestCaseVersionId);
         modelBuilder.Entity<SelfHealingAttempt>().HasIndex(a => a.CreatedAt);

@@ -14,6 +14,7 @@ import { useProfile } from '../../lib/auth/useProfile';
 import { Permissions, hasPermission } from '../../lib/auth/permissions';
 import { useAppStore } from '../../stores/useAppStore';
 import { defectStatusTone, severityTone } from '../bugs/DefectsListPage';
+import { FlakinessReportTab } from './FlakinessReportTab';
 
 const PAGE_SIZE = 25;
 const EXECUTION_STATUSES = ['', 'Passed', 'Failed', 'Cancelled', 'TimedOut', 'Error', 'Queued', 'Running'];
@@ -22,7 +23,7 @@ const DEFECT_STATUSES = ['', 'Open', 'InProgress', 'Resolved', 'Closed', 'Reject
 const SEVERITIES = ['', 'Critical', 'High', 'Medium', 'Low'];
 const SYNC_STATUSES = ['', 'Pending', 'Synced', 'Failed'];
 
-type Tab = 'executions' | 'defects' | 'tickets';
+type Tab = 'executions' | 'defects' | 'tickets' | 'flakiness';
 
 function formatTime(iso: string | null): string {
   if (!iso) return '—';
@@ -202,6 +203,7 @@ export function ReportsPage() {
     { id: 'executions', label: 'Executions' },
     { id: 'defects', label: 'Defects' },
     { id: 'tickets', label: 'Tickets' },
+    { id: 'flakiness', label: 'Flakiness' },
   ];
 
   if (!canRead && !profile.isLoading) {
@@ -481,6 +483,10 @@ export function ReportsPage() {
             )}
           </CardContent>
         </Card>
+      )}
+
+      {tab === 'flakiness' && projectId && (
+        <FlakinessReportTab projectId={projectId} range={range} enabled={enabled} />
       )}
     </div>
   );

@@ -18,6 +18,11 @@ vi.mock('../../lib/api/endpoints/dashboard', () => ({
     failures: (p: string, r: unknown) => ['dashboard', 'failures', p, r],
     defects: (p: string, r: unknown) => ['dashboard', 'defects', p, r],
     tickets: (p: string, r: unknown) => ['dashboard', 'tickets', p, r],
+    executive: (p: string, r: unknown) => ['dashboard', 'executive', p, r],
+    flakinessTrend: (p: string, r: unknown) => ['dashboard', 'flakiness-trend', p, r],
+    healing: (p: string, r: unknown) => ['dashboard', 'healing', p, r],
+    durations: (p: string, r: unknown) => ['dashboard', 'durations', p, r],
+    readiness: (p: string, r: unknown) => ['dashboard', 'readiness', p, r],
   },
   dashboardEndpoints: {
     summary: vi.fn(),
@@ -25,6 +30,11 @@ vi.mock('../../lib/api/endpoints/dashboard', () => ({
     failures: vi.fn(),
     defects: vi.fn(),
     tickets: vi.fn(),
+    executive: vi.fn(),
+    flakinessTrend: vi.fn(),
+    healing: vi.fn(),
+    durations: vi.fn(),
+    readiness: vi.fn(),
   },
 }));
 
@@ -47,8 +57,45 @@ const mockedSummary = vi.mocked(dashboardEndpoints.summary);
 const mockedTrend = vi.mocked(dashboardEndpoints.trend);
 const mockedFailures = vi.mocked(dashboardEndpoints.failures);
 const mockedDefectOverview = vi.mocked(dashboardEndpoints.defects);
+const mockedExecutive = vi.mocked(dashboardEndpoints.executive);
+const mockedFlakinessTrend = vi.mocked(dashboardEndpoints.flakinessTrend);
+const mockedHealing = vi.mocked(dashboardEndpoints.healing);
+const mockedDurations = vi.mocked(dashboardEndpoints.durations);
 const mockedProjectList = vi.mocked(projectsEndpoints.list);
 const mockedProfile = vi.mocked(useProfile);
+
+const executivePayload = () => ({
+  projectId: 'p1',
+  from: '2026-08-30T00:00:00Z',
+  to: '2026-09-29T00:00:00Z',
+  terminalExecutions: 10,
+  totalExecutions: 10,
+  passRate: 0.7,
+  failRate: 0.2,
+  flakinessIndex: 25,
+  flakyTests: 1,
+  eligibleTests: 4,
+  automationCoverage: 75,
+  automatedCases: 3,
+  eligibleCases: 4,
+  releaseReadiness: 82,
+  readinessStatus: 'Ready',
+  readinessComponents: [
+    { component: 'PassRate', value: 70, weight: 35, contribution: 24.5, threshold: 'Terminal pass rate ≥ 80%', detail: 'd' },
+  ],
+  openCriticalHighDefects: 0,
+  defectsPer100Executions: 10,
+  defectsCreated: 1,
+  defectsPerCase: 0.5,
+  averageDurationMs: 1200,
+  totalDurationMs: 12000,
+  durationSampleCount: 10,
+  healingSuccessRate: 66.7,
+  healingAttempts: 3,
+  healingApplied: 2,
+  unstableExecutions: 1,
+  cancelledExecutions: 0,
+});
 
 const summaryPayload = (overrides = {}) => ({
   projectId: 'p1',
@@ -149,6 +196,22 @@ describe('DashboardPage', () => {
       bySeverity: [{ name: 'High', count: 2 }],
       byClassification: [{ name: 'ApplicationDefect', count: 2 }],
       recent: [],
+    });
+    mockedExecutive.mockResolvedValue(executivePayload());
+    mockedFlakinessTrend.mockResolvedValue({
+      projectId: 'p1', from: '', to: '', granularity: 'day',
+      points: [{ date: '2026-09-28', eligibleTests: 2, flakyTests: 1, index: 50 }],
+    });
+    mockedHealing.mockResolvedValue({
+      projectId: 'p1', from: '', to: '', attempts: 3, applied: 2, failed: 1,
+      deterministic: 2, aiAssisted: 1, successRate: 66.7,
+      testsWithHealing: 2, executionsWithHealing: 2, testsHealedAndFlaky: 1,
+      points: [{ date: '2026-09-28', attempts: 3, applied: 2 }],
+    });
+    mockedDurations.mockResolvedValue({
+      projectId: 'p1', from: '', to: '', count: 10, averageMs: 1200,
+      minMs: 100, maxMs: 5000, totalMs: 12000, p50Ms: 900, p90Ms: 3000,
+      slaConfigured: false, openDefectAging: [{ name: '0-7 days', count: 2 }], points: [],
     });
   });
 
