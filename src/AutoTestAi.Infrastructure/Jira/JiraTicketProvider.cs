@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -101,7 +102,7 @@ public sealed class JiraTicketProvider : IJiraTicketProvider
             using var response = await client.SendAsync(httpRequest, HttpCompletionOption.ResponseContentRead, timeout.Token);
             status = response.StatusCode;
             responseBody = await ReadBoundedAsync(response, Math.Max(1, settings.MaxErrorBodyChars), timeout.Token);
-            MapStatus(status);
+            MapStatus(status, response);
         }
         catch (JiraProviderException)
         {
@@ -143,7 +144,7 @@ public sealed class JiraTicketProvider : IJiraTicketProvider
         }
     }
 
-    private static void MapStatus(HttpStatusCode status)
+    private static void MapStatus(HttpStatusCode status, HttpResponseMessage response)
     {
         if ((int)status is >= 200 and < 300)
             return;
@@ -158,10 +159,43 @@ public sealed class JiraTicketProvider : IJiraTicketProvider
             HttpStatusCode.Conflict => new JiraProviderException(JiraErrorKind.Conflict,
                 "Jira reported a conflict for this request."),
             HttpStatusCode.TooManyRequests => new JiraProviderException(JiraErrorKind.RateLimited,
-                "Jira rate-limited the request. Please try again shortly."),
+                "Jira rate-limited the request. Please try again shortly.", null, ParseRetryAfter(response)),
             _ when (int)status >= 500 => JiraProviderException.Unavailable("Jira is currently unavailable. Please try again later."),
             _ => JiraProviderException.Unavailable($"Jira returned HTTP {(int)status}."),
         };
+    }
+
+    /// <summary>
+    /// Best-effort `Retry-After` extraction (delta-seconds or HTTP-date).
+    /// Returns null when absent or unparsable; callers bound the value.
+    /// Headers only — never bodies — so nothing sensitive is captured.
+    /// </summary>
+    internal static TimeSpan? ParseRetryAfter(HttpResponseMessage response)
+    {
+        try
+        {
+            var value = response.Headers.RetryAfter;
+            if (value is null)
+            {
+                if (!response.Headers.TryGetValues("Retry-After", out var rawValues))
+                    return null;
+                var raw = rawValues.FirstOrDefault()?.Trim() ?? string.Empty;
+                if (int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
+                    return TimeSpan.FromSeconds(Math.Clamp(seconds, 0, 3600));
+                if (DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+                    return date - DateTimeOffset.UtcNow;
+                return null;
+            }
+            if (value.Delta.HasValue)
+                return TimeSpan.FromSeconds(Math.Clamp(value.Delta.Value.TotalSeconds, 0, 3600));
+            if (value.Date.HasValue)
+                return value.Date.Value - DateTimeOffset.UtcNow;
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static async Task<string> ReadBoundedAsync(HttpResponseMessage response, int maxChars, CancellationToken ct)

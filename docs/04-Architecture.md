@@ -180,6 +180,64 @@ orchestrator; no second scheduler is introduced. Cancellation, timeout,
 and retry semantics from Slice 5 are preserved.
 ```
 
+Slice-10 automated defect ticketing (Phase 2, policy-controlled):
+
+```text
+Defect created (DefectService, human action, bugs.manage)
+  → AutomatedTicketService.RequestAutomationAsync (Jira-free, fast)
+  → deterministic AutoTicketPolicy evaluation (no AI/LLM)
+  → eligible? Pending Ticket intent (Origin=Automatic) persisted
+  → AutoTicketQueue handoff → AutoTicketBackgroundService
+  → AutomatedTicketService.ExecutePendingAsync (scoped)
+  → existing TicketService/Jira provider stack (IJiraTicketProvider)
+  → Jira REST /rest/api/3/issue → Ticket (Synced) + audit
+```
+
+Automation reuses the Slice-7 Jira provider abstraction, content
+builder, severity mapper, URL validator, and the same idempotency
+constraint (one Synced ticket per defect per integration). The defect
+request path never calls Jira: policy evaluation plus a Pending intent
+row is persisted synchronously, and the Jira call runs in the
+background service. Durability comes from the persisted intent row, not
+the in-memory queue — a startup/startup-interval reconciliation pass
+re-discovers Pending/Failed-due rows, so eligible automation survives an
+API process restart. A Temporal workflow was deliberately not added:
+automation is a short idempotent side effect with bounded retries, and
+the Pending-row plus reconciliation design is durable enough without a
+second orchestration path. No AI decides eligibility; deterministic
+defect fields plus the project policy decide. No policy (or a disabled
+policy) means no automation. Manual Slice-7 creation is unchanged and
+converges idempotently with automatic tickets. Ticket.Origin
+(Manual/Automatic) distinguishes the two in the UI and reports.
+
+Cross-instance safety comes from persistence, not in-process locks
+(semaphores remain only as a local fast path). Each intent carries a
+claim lease (`ClaimToken` + `ClaimExpiresAt`, default 300s) guarded by
+an optimistic-concurrency `RowVersion`, plus a unique filtered index
+allowing at most one Pending intent per defect per integration:
+
+```text
+Pending (unclaimed)
+  → Pending (claimed by token T, lease L) → Jira attempt
+  → Synced (terminal; claim cleared) — only if T still holds a live lease
+  → Failed retryable (claim released, NextAttemptAt set, bounded x5)
+  → Failed permanent (claim released, no schedule)
+```
+
+Only the live claimant's writes land: a concurrent claimant loses the
+compare-and-set and converges; a stale claimant (crashed, timed out,
+reclaimed) fails the live-ownership check after its Jira call and
+persists nothing, so it can never overwrite current state or regress a
+Synced row. Expired claims are reclaimable, so a crashed holder never
+parks automation. Every execution (including retries and reconciliation)
+re-evaluates the current policy, so disabling the policy stops future
+Jira creation. Rate-limit retries honor a bounded server `Retry-After`
+hint. Residual limitation (explicit): Jira POST has no exactly-once
+guarantee — if the process crashes after Jira accepts the issue but
+before local persistence, a bounded retry may create a second external
+issue; reclamation after an incomplete attempt is audited as ambiguous
+(`ticket.automation.recovered`) with the same warning.
+
 ## 6. AI Provider Abstraction
 
 Business modules depend on an internal abstraction, not vendor SDKs.

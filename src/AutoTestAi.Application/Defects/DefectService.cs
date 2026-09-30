@@ -6,10 +6,12 @@ using AutoTestAi.Application.Identity;
 using AutoTestAi.Application.TestCases;
 using AutoTestAi.Application.TestExecution;
 using AutoTestAi.Application.TestGeneration;
+using AutoTestAi.Application.Tickets;
 using AutoTestAi.Domain.Defects;
 using AutoTestAi.Domain.Entities;
 using AutoTestAi.Domain.Enums;
 using DomainFailureAnalysis = AutoTestAi.Domain.Entities.FailureAnalysis;
+using Microsoft.Extensions.Logging;
 
 namespace AutoTestAi.Application.Defects;
 
@@ -41,6 +43,8 @@ public sealed class DefectService : IDefectService
     private readonly IUserDirectory _users;
     private readonly IDateTimeProvider _clock;
     private readonly IAuditService _audit;
+    private readonly IAutomatedTicketService _autoTickets;
+    private readonly ILogger<DefectService> _logger;
 
     public DefectService(
         IDefectStore store,
@@ -50,7 +54,9 @@ public sealed class DefectService : IDefectService
         IAuthorizationService authorization,
         IUserDirectory users,
         IDateTimeProvider clock,
-        IAuditService audit)
+        IAuditService audit,
+        IAutomatedTicketService autoTickets,
+        ILogger<DefectService> logger)
     {
         _store = store;
         _executions = executions;
@@ -60,6 +66,8 @@ public sealed class DefectService : IDefectService
         _users = users;
         _clock = clock;
         _audit = audit;
+        _autoTickets = autoTickets;
+        _logger = logger;
     }
 
     public async Task<DefectDetailDto> CreateAsync(
@@ -133,6 +141,18 @@ public sealed class DefectService : IDefectService
             analysis is null ? "defect.created" : "defect.created_from_analysis",
             "defect", defect.Id.ToString(), defect.ProjectId,
             SafeMeta(defect, test, analysis), cancellationToken);
+
+        // Phase 2 Slice 10: policy-controlled automation is Jira-free and fast
+        // (policy check + Pending intent only). The Jira call runs in the
+        // background. Automation failures never fail defect creation.
+        try
+        {
+            await _autoTickets.RequestAutomationAsync(defect.ProjectId, defect.Id, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Auto-ticket request for defect {DefectId} did not complete.", defect.Id);
+        }
 
         return await MapDetailAsync(defect, cancellationToken);
     }

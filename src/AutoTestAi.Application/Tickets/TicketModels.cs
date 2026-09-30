@@ -18,7 +18,8 @@ public sealed record TicketDto(
     Guid? CreatedBy,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    bool AlreadyExisted = false);
+    bool AlreadyExisted = false,
+    string Origin = "Manual");
 
 public sealed record JiraIntegrationStatusDto(
     string Provider,

@@ -15,6 +15,8 @@ export interface JiraTicket {
   createdAt: string;
   updatedAt: string;
   alreadyExisted?: boolean;
+  /** Slice 10: how the ticket was created ("Manual" | "Automatic"). */
+  origin?: string;
 }
 
 export interface JiraIntegrationStatus {

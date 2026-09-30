@@ -73,6 +73,17 @@ public sealed class DefectServiceTests
         { Actions.Add(a); return Task.CompletedTask; }
     }
 
+    /// <summary>Slice 10: defect creation triggers automation best-effort; tests isolate from Jira.</summary>
+    private sealed class NoopAutoTickets : AutoTestAi.Application.Tickets.IAutomatedTicketService
+    {
+        public Task<AutoTestAi.Application.Tickets.AutoTicketRequestResult> RequestAutomationAsync(Guid p, Guid d, CancellationToken ct)
+            => Task.FromResult(new AutoTestAi.Application.Tickets.AutoTicketRequestResult("skipped_no_policy"));
+        public Task<AutoTestAi.Application.Tickets.TicketDto?> ExecutePendingAsync(Guid t, CancellationToken ct)
+            => Task.FromResult<AutoTestAi.Application.Tickets.TicketDto?>(null);
+        public Task<AutoTestAi.Application.Tickets.TicketDto> RetryFailedAsync(Guid p, Guid d, CancellationToken ct)
+            => throw new NotImplementedException();
+    }
+
     // ---------- builders ----------
 
     private sealed record Harness(
@@ -122,7 +133,8 @@ public sealed class DefectServiceTests
 
         var service = new DefectService(
             store, executions, cases, user, authorization, directory,
-            new SystemDateTimeProvider(), audit);
+            new SystemDateTimeProvider(), audit, new NoopAutoTickets(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<DefectService>.Instance);
         return new Harness(service, store, executions, audit, execution.Id, test.Id, analysis.Id);
     }
 

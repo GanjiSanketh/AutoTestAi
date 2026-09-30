@@ -39,6 +39,9 @@ public static class DependencyInjection
         services.AddScoped<IDefectService, DefectService>();
         services.AddScoped<Tickets.ITicketService, Tickets.TicketService>();
         services.AddScoped<Tickets.IJiraIntegrationService, Tickets.JiraIntegrationService>();
+        services.AddSingleton<Tickets.AutoTicketQueue>();
+        services.AddScoped<Tickets.IAutoTicketPolicyService, Tickets.AutoTicketPolicyService>();
+        services.AddScoped<Tickets.IAutomatedTicketService, Tickets.AutomatedTicketService>();
         services.AddScoped<Reports.IDashboardService, Reports.DashboardService>();
         services.AddScoped<Reports.IReportService, Reports.ReportService>();
         services.AddScoped<ExecutionGrid.IExecutionGridService, ExecutionGrid.ExecutionGridService>();

@@ -5,6 +5,7 @@ using System.Text.Json;
 using AutoTestAi.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -13,9 +14,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AutoTestAi.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AutoTestAiDbContext))]
-    partial class AutoTestAiDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260929153002_Slice10_AutoTicketing")]
+    partial class Slice10_AutoTicketing
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1024,12 +1027,6 @@ namespace AutoTestAi.Infrastructure.Persistence.Migrations
                     b.Property<int>("AttemptCount")
                         .HasColumnType("integer");
 
-                    b.Property<DateTimeOffset?>("ClaimExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("ClaimToken")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1070,10 +1067,6 @@ namespace AutoTestAi.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<long>("RowVersion")
-                        .IsConcurrencyToken()
-                        .HasColumnType("bigint");
-
                     b.Property<string>("Status")
                         .HasColumnType("text");
 
@@ -1102,10 +1095,6 @@ namespace AutoTestAi.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.HasIndex("ProjectId", "SyncStatus", "NextAttemptAt");
-
-                    b.HasIndex(new[] { "DefectId", "IntegrationId" }, "IX_tickets_DefectId_IntegrationId_Pending")
-                        .IsUnique()
-                        .HasFilter("\"DefectId\" IS NOT NULL AND \"IntegrationId\" IS NOT NULL AND \"SyncStatus\" = 'Pending'");
 
                     b.ToTable("tickets", (string)null);
                 });

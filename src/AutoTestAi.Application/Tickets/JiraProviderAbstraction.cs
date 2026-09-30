@@ -51,10 +51,18 @@ public sealed class JiraProviderException : Exception
 {
     public JiraErrorKind Kind { get; }
 
-    public JiraProviderException(JiraErrorKind kind, string message, Exception? inner = null)
+    /// <summary>
+    /// Server-requested retry delay from the Jira `Retry-After` response
+    /// header (rate limiting only). Null when absent, unparsable, or not
+    /// applicable. Consumers must bound it before scheduling.
+    /// </summary>
+    public TimeSpan? RetryAfter { get; }
+
+    public JiraProviderException(JiraErrorKind kind, string message, Exception? inner = null, TimeSpan? retryAfter = null)
         : base(message, inner)
     {
         Kind = kind;
+        RetryAfter = retryAfter;
     }
 
     public static JiraProviderException Validation(string message)

@@ -290,6 +290,11 @@ export function DefectDetailsPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-sm font-semibold text-slate-900">{defectTicket.data.externalKey}</span>
                     <Badge tone="success">{defectTicket.data.syncStatus}</Badge>
+                    {defectTicket.data.origin === 'Automatic' ? (
+                      <Badge tone="ai">Auto-created</Badge>
+                    ) : (
+                      <Badge tone="neutral">Manual</Badge>
+                    )}
                   </div>
                   <MetaRow label="Provider" value={defectTicket.data.provider} />
                   <MetaRow label="Created" value={new Date(defectTicket.data.createdAt).toLocaleString()} />

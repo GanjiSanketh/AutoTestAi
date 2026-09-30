@@ -122,4 +122,51 @@ public sealed class JiraProviderTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => Create(handler).CreateIssueAsync(Request(), "e", "t", cts.Token));
     }
+
+    [Fact]
+    public async Task RateLimited_SurfacesRetryAfter_DeltaSeconds()
+    {
+        var handler = new StubHandler();
+        handler.Responder = _ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+            {
+                Content = new StringContent("""{"errorMessages":["slow down"]}""", Encoding.UTF8, "application/json"),
+            };
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(120));
+            return response;
+        };
+        var ex = await Assert.ThrowsAsync<JiraProviderException>(
+            () => Create(handler).CreateIssueAsync(Request(), "e", "t", CancellationToken.None));
+        Assert.Equal(JiraErrorKind.RateLimited, ex.Kind);
+        Assert.Equal(TimeSpan.FromSeconds(120), ex.RetryAfter);
+    }
+
+    [Fact]
+    public async Task RateLimited_WithoutRetryAfter_LeavesHintNull()
+    {
+        var handler = new StubHandler();
+        handler.Responder = _ => new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        {
+            Content = new StringContent("""{"errorMessages":["slow down"]}""", Encoding.UTF8, "application/json"),
+        };
+        var ex = await Assert.ThrowsAsync<JiraProviderException>(
+            () => Create(handler).CreateIssueAsync(Request(), "e", "t", CancellationToken.None));
+        Assert.Equal(JiraErrorKind.RateLimited, ex.Kind);
+        Assert.Null(ex.RetryAfter);
+    }
+
+    [Fact]
+    public async Task NonRateLimited_NeverCarriesRetryAfter()
+    {
+        var handler = new StubHandler();
+        handler.Responder = _ => new HttpResponseMessage(HttpStatusCode.InternalServerError)
+        {
+            Content = new StringContent("oops", Encoding.UTF8, "application/json"),
+        };
+        var ex = await Assert.ThrowsAsync<JiraProviderException>(
+            () => Create(handler).CreateIssueAsync(Request(), "e", "t", CancellationToken.None));
+        Assert.Equal(JiraErrorKind.Unavailable, ex.Kind);
+        Assert.Null(ex.RetryAfter);
+    }
 }

@@ -47,6 +47,8 @@ public static class DependencyInjection
             services.AddScoped<IDefectStore, Defects.EfDefectStore>();
             services.AddScoped<Application.Tickets.ITicketStore, Tickets.EfTicketStore>();
             services.AddScoped<Application.Tickets.IIntegrationStore, Tickets.EfIntegrationStore>();
+            services.AddScoped<Application.Tickets.IAutoTicketPolicyStore, Tickets.EfAutoTicketPolicyStore>();
+            services.AddScoped<Application.Tickets.IAutoTicketQueryStore, Tickets.EfAutoTicketQueryStore>();
             services.AddScoped<Application.Reports.IReportQueryStore, Reports.EfReportQueryStore>();
             services.AddScoped<Application.ExecutionGrid.IGridWorkerStore, ExecutionGrid.EfGridWorkerStore>();
             services.AddScoped<Application.ExecutionGrid.IGridAssignmentStore, ExecutionGrid.EfGridAssignmentStore>();
@@ -64,6 +66,8 @@ public static class DependencyInjection
             services.AddSingleton<IDefectStore, Defects.UnavailableDefectStore>();
             services.AddSingleton<Application.Tickets.ITicketStore, Tickets.UnavailableTicketStore>();
             services.AddSingleton<Application.Tickets.IIntegrationStore, Tickets.UnavailableIntegrationStore>();
+            services.AddSingleton<Application.Tickets.IAutoTicketPolicyStore, Tickets.UnavailableAutoTicketPolicyStore>();
+            services.AddSingleton<Application.Tickets.IAutoTicketQueryStore, Tickets.UnavailableAutoTicketQueryStore>();
             services.AddSingleton<Application.Reports.IReportQueryStore, Reports.UnavailableReportQueryStore>();
             services.AddSingleton<Application.ExecutionGrid.IGridWorkerStore, ExecutionGrid.UnavailableGridWorkerStore>();
             services.AddSingleton<Application.ExecutionGrid.IGridAssignmentStore, ExecutionGrid.UnavailableGridAssignmentStore>();

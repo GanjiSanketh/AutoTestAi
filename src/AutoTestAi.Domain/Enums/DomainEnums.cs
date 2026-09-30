@@ -74,6 +74,17 @@ public enum TicketSyncStatus
     Failed = 2
 }
 
+/// <summary>
+/// How a ticket row was created (Phase 2 Slice 10). Manual rows come from
+/// the human "Create Jira Ticket" action (Slice 7); Automatic rows come
+/// from policy-controlled automation. Stored as string.
+/// </summary>
+public enum TicketOrigin
+{
+    Manual = 0,
+    Automatic = 1
+}
+
 public enum Priority
 {
     Critical = 0,

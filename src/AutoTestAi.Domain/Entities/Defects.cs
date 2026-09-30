@@ -40,6 +40,26 @@ public sealed class Ticket : EntityBase
     public string Title { get; set; } = string.Empty;
     public string? Status { get; set; }
     public TicketSyncStatus SyncStatus { get; set; } = TicketSyncStatus.Pending;
+    /// <summary>
+    /// How this ticket was created (Phase 2 Slice 10). Pre-Slice-10 rows
+    /// read as Manual. Automation sets Automatic.
+    /// </summary>
+    public TicketOrigin Origin { get; set; } = TicketOrigin.Manual;
+    /// <summary>Number of Jira creation attempts for this row (automation retry bookkeeping).</summary>
+    public int AttemptCount { get; set; }
+    /// <summary>Earliest time a failed automatic attempt may be retried (null = no retry scheduled).</summary>
+    public DateTimeOffset? NextAttemptAt { get; set; }
+    /// <summary>
+    /// Slice 10 automation lease: token of the claimant currently allowed to
+    /// execute this intent. Null means unclaimed. Correctness across API
+    /// instances comes from this persisted lease plus optimistic concurrency,
+    /// never from in-process locks alone.
+    /// </summary>
+    public Guid? ClaimToken { get; set; }
+    /// <summary>UTC expiry of the current claim. Expired claims are reclaimable (crash recovery).</summary>
+    public DateTimeOffset? ClaimExpiresAt { get; set; }
+    /// <summary>Optimistic concurrency token (compare-and-set for claim/finish writes).</summary>
+    public uint RowVersion { get; set; }
     public Guid? CreatedBy { get; set; }
     /// <summary>Safe diagnostic for the last failed creation attempt (never secrets).</summary>
     public string? LastError { get; set; }
@@ -57,4 +77,29 @@ public sealed class Integration : EntityBase
     public JsonDocument? Configuration { get; set; }
     public string? SecretReference { get; set; }
     public IntegrationStatus Status { get; set; } = IntegrationStatus.Active;
+}
+
+/// <summary>
+/// Project-scoped automatic Jira ticket policy (Phase 2 Slice 10).
+/// One row per project at most. Absence of a row means automation is
+/// disabled. Evaluation is deterministic; no AI is involved.
+/// </summary>
+public sealed class AutoTicketPolicy : EntityBase
+{
+    public Guid ProjectId { get; set; }
+    public bool Enabled { get; set; }
+    /// <summary>
+    /// Explicit Jira integration to ticket through. Null resolves to the
+    /// project's default Jira integration.
+    /// </summary>
+    public Guid? IntegrationId { get; set; }
+    /// <summary>Comma-separated eligible severities (e.g. "Critical,High").</summary>
+    public string Severities { get; set; } = string.Empty;
+    /// <summary>Comma-separated eligible defect statuses (e.g. "Open").</summary>
+    public string DefectStatuses { get; set; } = string.Empty;
+    /// <summary>Comma-separated eligible failure classifications.</summary>
+    public string Classifications { get; set; } = string.Empty;
+    /// <summary>Optional minimum AI confidence (0-1). Null disables the filter.</summary>
+    public decimal? MinimumConfidence { get; set; }
+    public Guid? UpdatedBy { get; set; }
 }

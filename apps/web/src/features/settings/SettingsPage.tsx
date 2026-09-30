@@ -1,5 +1,11 @@
 import { ExecutionGridSettings } from './ExecutionGridSettings';
+import { AutoTicketSettings } from './AutoTicketSettings';
 
 export function SettingsPage() {
-  return <ExecutionGridSettings />;
+  return (
+    <div className="space-y-4">
+      <AutoTicketSettings />
+      <ExecutionGridSettings />
+    </div>
+  );
 }

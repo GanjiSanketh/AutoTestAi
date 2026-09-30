@@ -193,4 +193,22 @@ describe('DefectDetailsPage Jira section (Slice 7)', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByText(/manual action/i)).toBeNull());
   });
+
+  it('marks automatically created tickets distinctly (Slice 10)', async () => {
+    profileWith([Permissions.BugsRead, Permissions.TicketsRead, Permissions.TicketsCreate]);
+    mockedJiraStatus.mockResolvedValue({ provider: 'jira', configured: true, enabled: true, projectKey: 'ABC', baseUrl: 'https://jira.test', issueType: 'Bug' });
+    mockedTicketGet.mockResolvedValue(ticket({ origin: 'Automatic' }));
+    renderPage();
+    expect(await screen.findByText('ABC-123')).toBeTruthy();
+    expect(await screen.findByText('Auto-created')).toBeTruthy();
+  });
+
+  it('marks manually created tickets distinctly (Slice 10)', async () => {
+    profileWith([Permissions.BugsRead, Permissions.TicketsRead, Permissions.TicketsCreate]);
+    mockedJiraStatus.mockResolvedValue({ provider: 'jira', configured: true, enabled: true, projectKey: 'ABC', baseUrl: 'https://jira.test', issueType: 'Bug' });
+    mockedTicketGet.mockResolvedValue(ticket({ origin: 'Manual' }));
+    renderPage();
+    expect(await screen.findByText('ABC-123')).toBeTruthy();
+    expect(await screen.findByText('Manual')).toBeTruthy();
+  });
 });

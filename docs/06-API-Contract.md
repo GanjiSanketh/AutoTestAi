@@ -418,9 +418,77 @@ limits → `429`; Jira unreachable/timeout → `503`/`502` without leaking
 provider bodies. Audit events `ticket.creation_requested/created/
 creation_failed` and `integration.jira_configured/updated` carry safe
 metadata only. Timeouts are ambiguous by nature — the failure message tells
-the operator to check Jira before retrying. Known limitations: manual
-creation only; no bidirectional sync, webhooks, polling, Azure DevOps, or
-automatic ticketing.
+the operator to check Jira before retrying. Ticket `origin` is `Manual`
+for every Slice-7 ticket. Known limitations carried from Slice 7: no
+bidirectional sync, webhooks, polling, or Azure DevOps.
+
+### 10.1 Automated Ticketing (Phase 2 Slice 10)
+
+Policy-controlled automatic Jira creation for eligible internal defects.
+Slice 7 stays manual-only in behavior; automation is an additional
+system path that reuses the same provider and idempotency, and manual
+and automatic tickets converge on the same Synced record.
+
+```http
+GET /api/v1/projects/{projectId}/auto-ticket-policy
+PUT /api/v1/projects/{projectId}/auto-ticket-policy
+GET /api/v1/projects/{projectId}/auto-ticket-policy/status
+POST /api/v1/projects/{projectId}/defects/{defectId}/ticket/automation/retry
+```
+
+Policy upsert (`settings.manage`):
+
+```json
+{
+  "enabled": true,
+  "integrationId": null,
+  "severities": ["Critical", "High"],
+  "defectStatuses": ["Open"],
+  "classifications": ["ApplicationDefect"],
+  "minimumConfidence": 0.7
+}
+```
+
+Rules: no policy (or `enabled: false`) means no automation — the safe
+default. Evaluation is deterministic (severity, defect status, failure
+classification, optional confidence threshold); no AI decides. The
+defect request path never calls Jira; a Pending automatic intent is
+persisted and executed by the background service. Every execution —
+first attempt, retry, background reconciliation, operator retry — first
+re-evaluates the current policy, so disabling the policy stops future
+Jira creation (operator retry against an ineligible policy is rejected
+with `409`). Retryable Jira failures (timeout, 429, 5xx) schedule
+bounded retries (max 5 attempts, exponential backoff; a server
+`Retry-After` hint is honored but clamped to 1s–1h); validation (400),
+auth (401), permission (403), not-found (404), and malformed responses
+are permanent and never spin. Retry returns `202` when requeued and
+idempotent `200` when a Synced ticket already exists. Reads require
+`tickets.read`; retry requires `tickets.create`. Claim/lease semantics:
+one Pending intent per defect per integration (unique filtered index);
+execution requires a live database-backed claim (`ClaimToken` +
+`ClaimExpiresAt`, compare-and-set via `RowVersion`), so two API
+instances cannot execute Jira twice for the same intent; only the live
+claimant's writes land and Synced never regresses; expired claims are
+reclaimable after a crash. Claim tokens never appear in any response,
+log, or audit payload. Audit events
+`ticket.automation.skipped/requested/created/failed/retry_scheduled/
+recovered/superseded` and `autoticket.policy_configured/updated` carry
+safe metadata only with system (not human) actor attribution.
+Crash consistency: (A) before intent persistence — nothing to recover,
+next trigger retries; (B) after intent persistence — reconciliation
+re-discovers the Pending row; (C) after claim, before Jira — lease
+expires, another worker reclaims, exactly one executes at a time;
+(D) during the Jira request (crash/timeout) — ambiguous, recorded on
+recovery (`ticket.automation.recovered`) and retried bounded;
+(E) after Jira accepts but before local persistence — the residual
+window: a bounded retry may create a second external issue, and no
+Jira-supported idempotent POST exists in the integrated API surface to
+close it, so the limitation stays explicit and operators are told to
+check Jira before manually retrying; (F) after local Synced persistence
+— terminal, idempotent, all later triggers converge. Exactly-once
+external creation is therefore NOT claimed; what IS guaranteed is
+at-most-one concurrent executor, single authoritative internal Ticket,
+bounded retries, no silent loss, and full auditability.
 
 ## 11. Integrations
 

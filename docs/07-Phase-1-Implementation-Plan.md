@@ -55,6 +55,18 @@ Playwright workers enforce local capacity; API enforces global/project
 concurrency ceilings. Temporal remains orchestration authority.
 No auto-ticketing, self-healing, AI scheduling, or Phase 2+ features.
 
+### Phase 2 — Slice 10: Automated Defect Ticketing (implemented, Slice 10)
+Project-scoped automatic Jira ticket policy (admin-configured,
+secret-safe) plus deterministic eligibility evaluation and an
+asynchronous automation pipeline reusing the Slice-7 Jira provider.
+Defect creation persists a Pending automatic intent and enqueues
+background execution; bounded retries with backoff cover transient Jira
+failures, permanent/config failures stop without spinning, and manual
+creation converges idempotently with automatic tickets. Ticket origin
+(Manual/Automatic) is persisted and shown in the UI. No self-healing,
+predictive flakiness/analytics, autonomous authoring/scheduling, or
+AI ticket decisions.
+
 ## 3. Definition of Done
 
 A feature is complete only when its backend endpoint, authorization, validation, migration, frontend integration, loading/empty/error states, tests, OpenAPI update and security/audit considerations are present. No production-looking hardcoded data remains.

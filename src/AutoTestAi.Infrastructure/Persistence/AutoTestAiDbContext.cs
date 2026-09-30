@@ -38,6 +38,7 @@ public sealed class AutoTestAiDbContext : DbContext
     public DbSet<Defect> Defects => Set<Defect>();
     public DbSet<Ticket> Tickets => Set<Ticket>();
     public DbSet<Integration> Integrations => Set<Integration>();
+    public DbSet<AutoTicketPolicy> AutoTicketPolicies => Set<AutoTicketPolicy>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -175,8 +176,21 @@ public sealed class AutoTestAiDbContext : DbContext
             .IsUnique()
             .HasFilter("\"DefectId\" IS NOT NULL AND \"IntegrationId\" IS NOT NULL AND \"SyncStatus\" = 'Synced'");
         modelBuilder.Entity<Ticket>().Property(t => t.SyncStatus).HasConversion<string>();
+        modelBuilder.Entity<Ticket>().Property(t => t.Origin).HasConversion<string>();
         modelBuilder.Entity<Ticket>().Property(t => t.ExternalKey).HasMaxLength(50);
         modelBuilder.Entity<Ticket>().Property(t => t.LastError).HasMaxLength(2000);
+        // Slice 10: automation retry/reconciliation queries.
+        modelBuilder.Entity<Ticket>().HasIndex(t => new { t.ProjectId, t.SyncStatus, t.NextAttemptAt });
+        // Slice 10: cross-instance automation lease (optimistic compare-and-set).
+        modelBuilder.Entity<Ticket>().Property(t => t.RowVersion).IsConcurrencyToken();
+        // Slice 10: at most one Pending intent per defect per integration, so
+        // concurrent triggers across API instances converge instead of
+        // executing Jira twice. Failed rows stay retryable via reuse.
+        // (Distinct name: the Slice 7 Synced-only index is untouched.)
+        modelBuilder.Entity<Ticket>()
+            .HasIndex(t => new { t.DefectId, t.IntegrationId }, "IX_tickets_DefectId_IntegrationId_Pending")
+            .IsUnique()
+            .HasFilter("\"DefectId\" IS NOT NULL AND \"IntegrationId\" IS NOT NULL AND \"SyncStatus\" = 'Pending'");
         modelBuilder.Entity<Integration>().ToTable("integrations");
         modelBuilder.Entity<Integration>().HasIndex(i => i.ProjectId);
         // Slice 7: at most one Jira integration row per project.
@@ -186,6 +200,14 @@ public sealed class AutoTestAiDbContext : DbContext
             .HasFilter("\"ProjectId\" IS NOT NULL");
         modelBuilder.Entity<Integration>().Property(i => i.Configuration).HasColumnType("jsonb");
         modelBuilder.Entity<Integration>().Property(i => i.Status).HasConversion<string>();
+
+        // --- auto-ticket policy (Phase 2 Slice 10) ---
+        modelBuilder.Entity<AutoTicketPolicy>().ToTable("auto_ticket_policies");
+        // One active policy per project: automation scope is always project-local.
+        modelBuilder.Entity<AutoTicketPolicy>().HasIndex(p => p.ProjectId).IsUnique();
+        modelBuilder.Entity<AutoTicketPolicy>().Property(p => p.Severities).HasMaxLength(200);
+        modelBuilder.Entity<AutoTicketPolicy>().Property(p => p.DefectStatuses).HasMaxLength(200);
+        modelBuilder.Entity<AutoTicketPolicy>().Property(p => p.Classifications).HasMaxLength(200);
 
         ApplyInMemoryJsonCompatibility(modelBuilder);
 

@@ -165,6 +165,10 @@ public class Slice1ApiFactory : WebApplicationFactory<Program>
             services.AddScoped<AutoTestAi.Application.Tickets.ITicketStore, AutoTestAi.Infrastructure.Tickets.EfTicketStore>();
             services.RemoveAll<AutoTestAi.Application.Tickets.IIntegrationStore>();
             services.AddScoped<AutoTestAi.Application.Tickets.IIntegrationStore, AutoTestAi.Infrastructure.Tickets.EfIntegrationStore>();
+            services.RemoveAll<AutoTestAi.Application.Tickets.IAutoTicketPolicyStore>();
+            services.AddScoped<AutoTestAi.Application.Tickets.IAutoTicketPolicyStore, AutoTestAi.Infrastructure.Tickets.EfAutoTicketPolicyStore>();
+            services.RemoveAll<AutoTestAi.Application.Tickets.IAutoTicketQueryStore>();
+            services.AddScoped<AutoTestAi.Application.Tickets.IAutoTicketQueryStore, AutoTestAi.Infrastructure.Tickets.EfAutoTicketQueryStore>();
             services.RemoveAll<AutoTestAi.Application.Reports.IReportQueryStore>();
             services.AddScoped<AutoTestAi.Application.Reports.IReportQueryStore, AutoTestAi.Infrastructure.Reports.EfReportQueryStore>();
             services.AddSingleton<IExecutionWorkflowCoordinator>(WorkflowCoordinator);

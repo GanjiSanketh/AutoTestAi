@@ -195,6 +195,7 @@ public sealed class TicketService : ITicketService
                 CreatedBy = actor,
                 CreatedAt = now,
                 UpdatedAt = now,
+                Origin = TicketOrigin.Manual,
             };
             await _tickets.AddAsync(row, ct);
         }
@@ -282,6 +283,7 @@ public sealed class TicketService : ITicketService
                 Title = JiraTicketContentBuilder.BuildSummary(defect),
                 Status = "failed",
                 SyncStatus = TicketSyncStatus.Failed,
+                Origin = TicketOrigin.Manual,
                 LastError = Truncate(error),
                 CreatedBy = await ResolveAppUserIdAsync(ct),
                 CreatedAt = now,
@@ -366,7 +368,8 @@ public sealed class TicketService : ITicketService
     private static TicketDto Map(Ticket t, bool alreadyExisted) => new(
         t.Id, t.ProjectId, t.DefectId, t.IntegrationId, t.Provider,
         t.ExternalTicketId, t.ExternalKey, t.ExternalUrl, t.Title,
-        t.SyncStatus.ToString(), t.CreatedBy, t.CreatedAt, t.UpdatedAt, alreadyExisted);
+        t.SyncStatus.ToString(), t.CreatedBy, t.CreatedAt, t.UpdatedAt, alreadyExisted,
+        t.Origin.ToString());
 
     /// <summary>Wraps cancellation so the API layer maps it to 503 without leaking internals.</summary>
     private sealed class JiraProviderTimeoutLike : InvalidOperationException
