@@ -28,6 +28,12 @@ export interface WorkerConfig {
   browser: 'chromium' | 'firefox' | 'webkit';
   executionTimeoutMs: number;
   stepTimeoutMs: number;
+  /**
+   * Slice 11: bound for the AI healing-suggest round trip (control plane
+   * resolves the provider). A timeout is a controlled healing failure,
+   * never an execution hang.
+   */
+  healingAiTimeoutMs: number;
 }
 
 function required(name: string, fallback?: string): string {
@@ -61,7 +67,7 @@ export function loadConfig(): WorkerConfig {
     provisioningToken: process.env.GRID_PROVISIONING_TOKEN ?? '',
     callbackBaseUrl: process.env.WORKER_CALLBACK_URL ?? `http://localhost:${healthPort}`,
     heartbeatIntervalMs: numbered('WORKER_HEARTBEAT_INTERVAL_MS', 30000, 5000, 300000),
-    version: process.env.WORKER_VERSION ?? 'phase2-slice9',
+    version: process.env.WORKER_VERSION ?? 'phase2-slice11',
     apiBaseUrl: required('API_BASE_URL', 'http://localhost:5193'),
     temporalAddress: required('TEMPORAL_ADDRESS', 'localhost:7233'),
     taskQueue: required('TEMPORAL_TASK_QUEUE', 'autotestai-execution'),
@@ -70,5 +76,6 @@ export function loadConfig(): WorkerConfig {
     browser,
     executionTimeoutMs: numbered('WORKER_EXECUTION_TIMEOUT_MS', 300000, 10000, 3600000),
     stepTimeoutMs: numbered('WORKER_STEP_TIMEOUT_MS', 30000, 1000, 300000),
+    healingAiTimeoutMs: numbered('SELF_HEALING_AI_TIMEOUT_MS', 15000, 1000, 60000),
   };
 }

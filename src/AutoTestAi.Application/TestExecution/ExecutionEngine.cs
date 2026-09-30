@@ -4,6 +4,7 @@ using System.Text.Json;
 using AutoTestAi.Application.Audit;
 using AutoTestAi.Application.Common;
 using AutoTestAi.Application.ExecutionGrid;
+using AutoTestAi.Application.SelfHealing;
 using AutoTestAi.Application.Storage;
 using AutoTestAi.Application.TestCases;
 using AutoTestAi.Application.TestGeneration;
@@ -36,7 +37,8 @@ public sealed record WorkerExecutionOutcome(
     IReadOnlyList<WorkerStepResultDto> Steps,
     IReadOnlyList<WorkerLogDto> Logs,
     IReadOnlyList<WorkerScreenshotDto> Screenshots,
-    int Attempt);
+    int Attempt,
+    IReadOnlyList<WorkerHealingAttemptDto>? HealingAttempts = null);
 
 /// <summary>
 /// Workflow-facing execution engine (Slice 5 §10-11). Temporal activities are
@@ -69,6 +71,8 @@ public sealed class ExecutionEngine : IExecutionEngine
     private readonly IAuditService _audit;
     private readonly IGridLeaseManager? _leases;
     private readonly IGridAssignmentStore? _assignments;
+    private readonly ISelfHealingPolicyStore? _healingPolicies;
+    private readonly ISelfHealingService? _healing;
     private readonly ILogger<ExecutionEngine> _logger;
 
     public ExecutionEngine(
@@ -82,7 +86,9 @@ public sealed class ExecutionEngine : IExecutionEngine
         IAuditService audit,
         ILogger<ExecutionEngine> logger,
         IGridLeaseManager? leases = null,
-        IGridAssignmentStore? assignments = null)
+        IGridAssignmentStore? assignments = null,
+        ISelfHealingPolicyStore? healingPolicies = null,
+        ISelfHealingService? healing = null)
     {
         _store = store;
         _cases = cases;
@@ -94,6 +100,8 @@ public sealed class ExecutionEngine : IExecutionEngine
         _audit = audit;
         _leases = leases;
         _assignments = assignments;
+        _healingPolicies = healingPolicies;
+        _healing = healing;
         _logger = logger;
     }
 
@@ -148,7 +156,7 @@ public sealed class ExecutionEngine : IExecutionEngine
             new { executionId = execution.Id, executionTestId = test.Id, attempt = test.Attempt }, ct);
 
         return new PreparedExecution(executionId, test.Id, true, null,
-            BuildAssignment(execution, test, testCase, version), null);
+            await BuildAssignmentAsync(execution, test, testCase, version, ct), null);
     }
 
     // ---------- run ----------
@@ -260,6 +268,10 @@ public sealed class ExecutionEngine : IExecutionEngine
                                 status = step.Status,
                                 durationMs = step.DurationMs,
                                 errorMessage = RedactTruncate(step.ErrorMessage),
+                                healed = step.Healed,
+                                recoveredTarget = step.RecoveredTarget,
+                                healingStrategy = step.HealingStrategy,
+                                aiAssisted = step.AiAssisted,
                             },
                         }, ct);
             }
@@ -280,7 +292,8 @@ public sealed class ExecutionEngine : IExecutionEngine
                     MapWorkerStatus(result.Status), MapClassification(result.Classification),
                     result.ErrorType, Truncate(result.ErrorMessage),
                     started.ElapsedMilliseconds,
-                    result.StepResults, result.Logs, result.Screenshots, test.Attempt);
+                    result.StepResults, result.Logs, result.Screenshots, test.Attempt,
+                    result.HealingAttempts ?? Array.Empty<WorkerHealingAttemptDto>());
             }
 
             await Task.Delay(TimeSpan.FromSeconds(_options.Value.WorkerPollIntervalSeconds), ct);
@@ -347,6 +360,10 @@ public sealed class ExecutionEngine : IExecutionEngine
         await _store.AppendLogsAsync(logRows, ct);
 
         await PersistScreenshotsAsync(execution, test, outcome, ct);
+
+        // Slice 11: persist worker-reported healing outcomes (fenced). Healing
+        // never mutates the bound test version; history keeps original targets.
+        await RecordHealingAttemptsAsync(execution, test, outcome, ct);
 
         test.Status = outcome.Status;
         test.FailureClassification = outcome.Classification;
@@ -535,11 +552,12 @@ public sealed class ExecutionEngine : IExecutionEngine
         var testCase = await _cases.GetByIdAsync(test.TestCaseId, ct);
         if (version is null || testCase is null)
             throw new WorkerInfrastructureException("The bound test case version is unavailable.");
-        return BuildAssignment(execution, test, testCase, version);
+        return await BuildAssignmentAsync(execution, test, testCase, version, ct);
     }
 
-    private WorkerAssignmentDto BuildAssignment(
-        Execution execution, ExecutionTest test, TestCase testCase, TestCaseVersion version)
+    private async Task<WorkerAssignmentDto> BuildAssignmentAsync(
+        Execution execution, ExecutionTest test, TestCase testCase, TestCaseVersion version,
+        CancellationToken ct)
     {
         var steps = TestStep.Parse(version.StructuredSteps?.RootElement);
         var workerSteps = steps.Select(s => new WorkerStepDto(
@@ -557,7 +575,36 @@ public sealed class ExecutionEngine : IExecutionEngine
             string.IsNullOrWhiteSpace(test.Browser) ? "chromium" : test.Browser!,
             targetUrl, workerSteps, timeouts,
             ScreenshotOnFailure: true, ScreenshotOnFinish: false,
-            test.AssignmentToken ?? Guid.Empty);
+            test.AssignmentToken ?? Guid.Empty,
+            await ResolveHealingPolicyAsync(execution.ProjectId, ct));
+    }
+
+    /// <summary>
+    /// Slice 11: the worker-facing healing policy. Missing store rows and any
+    /// lookup failure mean disabled — normal steps never pay healing overhead
+    /// and pre-Slice-11 behavior is preserved exactly.
+    /// </summary>
+    private async Task<WorkerHealingPolicyDto?> ResolveHealingPolicyAsync(
+        Guid projectId, CancellationToken ct)
+    {
+        if (_healingPolicies is null)
+            return null;
+        try
+        {
+            var row = await _healingPolicies.GetByProjectAsync(projectId, ct);
+            if (row is null || !row.Enabled)
+                return null;
+            return new WorkerHealingPolicyDto(
+                true, row.AiFallbackEnabled, 1,
+                row.MinDeterministicScore, row.MinAiConfidence,
+                SelfHealingService.ParseStrategies(row.AllowedStrategies));
+        }
+        catch (Exception ex)
+        {
+            // Policy lookup must never fail an execution: heal nothing.
+            _logger.LogWarning(ex, "Self-healing policy lookup failed; healing disabled for this execution.");
+            return null;
+        }
     }
 
     private async Task PersistScreenshotsAsync(
@@ -603,6 +650,51 @@ public sealed class ExecutionEngine : IExecutionEngine
     private async Task PublishStatusAsync(Execution execution, CancellationToken ct)
         => await _events.PublishAsync(execution.Id, ExecutionEvents.ExecutionStatusChanged,
             new { executionId = execution.Id, status = execution.Status.ToString() }, ct);
+
+    /// <summary>
+    /// Slice 11: records healing outcomes under the same fencing as the result
+    /// itself. A stale worker's report is rejected (logged, never fatal to the
+    /// already-persisted execution result); failed healing flows into the
+    /// normal failure classification/defect pipeline untouched.
+    /// </summary>
+    private async Task RecordHealingAttemptsAsync(
+        Execution execution, ExecutionTest test, WorkerExecutionOutcome outcome,
+        CancellationToken ct)
+    {
+        if (_healing is null || outcome.HealingAttempts is null || outcome.HealingAttempts.Count == 0)
+            return;
+        Guid? assignmentId = null;
+        if (_assignments is not null)
+        {
+            try
+            {
+                assignmentId = (await _assignments.FindActiveByTestAsync(test.Id, ct))?.Id;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Healing assignment lookup failed for execution {ExecutionId}.",
+                    execution.Id);
+                return;
+            }
+        }
+        try
+        {
+            await _healing.RecordAttemptsAsync(execution.Id, assignmentId, outcome.HealingAttempts, ct);
+        }
+        catch (ConflictException ex)
+        {
+            // Stale report: the execution result already stands; healing state
+            // must not overwrite it.
+            _logger.LogWarning(ex, "Stale healing report ignored for execution {ExecutionId}.",
+                execution.Id);
+        }
+        catch (Exception ex)
+        {
+            // Healing persistence must never fail the execution result itself.
+            _logger.LogWarning(ex, "Healing persistence failed for execution {ExecutionId}.",
+                execution.Id);
+        }
+    }
 
     private static WorkerExecutionOutcome OutcomeFromPersisted(ExecutionTest test, int attempt)
         => new(test.Status, test.FailureClassification, test.ErrorType, test.ErrorMessage,

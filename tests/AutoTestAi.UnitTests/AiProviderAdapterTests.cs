@@ -3,6 +3,7 @@ using System.Text.Json;
 using AutoTestAi.Application.AI;
 using AutoTestAi.Application.Common;
 using AutoTestAi.Application.FailureAnalysis;
+using AutoTestAi.Application.SelfHealing;
 using AutoTestAi.Application.TestGeneration;
 using AutoTestAi.Infrastructure.AI;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -62,6 +63,7 @@ public sealed class AiProviderAdapterTests
         Options.Create(options),
         new AiTestGenerationPromptBuilder(),
         new AiFailureAnalysisPromptBuilder(),
+        new SelfHealingAiPromptBuilder(),
         NullLogger<OllamaAiProvider>.Instance);
 
     private static OpenAiAiProvider OpenAi(FakeHttpHandler handler, AiOptions options) => new(
@@ -69,6 +71,7 @@ public sealed class AiProviderAdapterTests
         Options.Create(options),
         new AiTestGenerationPromptBuilder(),
         new AiFailureAnalysisPromptBuilder(),
+        new SelfHealingAiPromptBuilder(),
         NullLogger<OpenAiAiProvider>.Instance);
 
     // ---------- Ollama ----------

@@ -17,6 +17,8 @@ projects → executions → execution_tests
 execution_tests → execution_logs
 execution_tests → execution_artifacts
 execution_tests → failure_analyses
+execution_tests → self_healing_attempts
+projects → self_healing_policies
 projects → defects → tickets
 projects → integrations
 users/projects → audit_events
@@ -84,6 +86,12 @@ users/projects → audit_events
 ### auto_ticket_policies (Slice 10)
 `id UUID PK`, `project_id FK UNIQUE` (one policy per project; absence means automation disabled), `enabled`, `integration_id NULL` (pinned Jira integration; NULL resolves to the project default), `severities` (CSV ≤200), `defect_statuses` (CSV ≤200), `classifications` (CSV ≤200), `minimum_confidence NULL` (0–1; NULL disables the filter), `updated_by NULL`, timestamps. No secrets: the policy references an integration row and never carries credentials.
 
+### self_healing_policies (Slice 11)
+`id UUID PK`, `project_id FK UNIQUE` (one policy per project; absence means healing disabled), `enabled`, `ai_fallback_enabled` (requires `enabled`), `max_attempts_per_step` (always 1 in Slice 11), `min_deterministic_score NULL` (0–100; NULL = conservative default), `min_ai_confidence NULL` (0–1; advisory only, NULL disables the filter), `allowed_strategies` (CSV ≤200; empty = safe default set), `updated_by NULL`, timestamps. No secrets, DOM, or credentials.
+
+### self_healing_attempts (Slice 11)
+`id UUID PK`, `project_id FK`, `execution_id FK`, `execution_test_id FK`, `test_case_id`, `test_case_version_id NULL` (snapshot reference — versions are never mutated by healing), `step_order`, `step_action` (≤200), `original_strategy` (≤50), `original_value` (bounded, redacted), `recovered_strategy` (≤50), `recovered_value` (bounded, redacted), `healing_strategy` (None/TestAttribute/Role/Label/Text/Structural/Ai), `status` (Applied/Failed persisted; granular candidate lifecycle lives in execution logs), `candidate_count`, `was_applied`, `is_ai_assisted`, `error_message` (≤2000, redacted), `assignment_id NULL` (lease that owned the run; NULL = legacy lease-free worker), timestamps. Unique `(execution_test_id,step_order)` (one authoritative outcome per step; concurrent workers converge); indexes on `project_id`, `execution_id`, `test_case_version_id`, `created_at`. Never stores raw DOM, screenshots per candidate, full prompts, or secrets.
+
 ### integrations
 `id UUID PK`, `project_id`, `provider`, `integration_type`, `configuration JSONB`, `secret_reference`, `status`, timestamps. Slice 7 Jira shape: `configuration = {baseUrl, projectKey, email, issueType, priorityMapping, appBaseUrl?}` (no secrets — the API token lives in `secret_reference` server-side only); unique filtered `(project_id,provider) WHERE project_id IS NOT NULL` (one Jira row per project).
 
@@ -107,6 +115,13 @@ bounded UTC date ranges (default 30 days, max 365).
 Slice 9 grid uses the tables above; queries are bounded by validated
 UTC date ranges (default 30 days, max 365). Concurrency is enforced by
 unique filtered indexes and optimistic concurrency tokens (`row_version`).
+
+Slice 11 healing adds the two tables above (one coherent migration).
+Concurrency is enforced by the unique `(execution_test_id,step_order)`
+index plus a pre-insert existence check (converge, never duplicate);
+stale workers are fenced by `assignment_id` against the live lease.
+Evidence retention is bounded by construction: only redacted locator
+pairs and counts persist (no DOM, no screenshots per candidate).
 
 ## 5. JSONB
 

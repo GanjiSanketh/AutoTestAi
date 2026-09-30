@@ -17,6 +17,8 @@ export const ExecutionEvent = {
   FailureAnalysisCompleted: 'FailureAnalysisCompleted',
   ExecutionCompleted: 'ExecutionCompleted',
   ExecutionFailed: 'ExecutionFailed',
+  SelfHealingApplied: 'SelfHealingApplied',
+  SelfHealingFailed: 'SelfHealingFailed',
 } as const;
 
 export type ExecutionEventName =

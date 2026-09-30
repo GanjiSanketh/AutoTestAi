@@ -167,6 +167,10 @@ public sealed class WorkerHttpTransport
                 s.TryGetProperty("contentType", out var ctp) && ctp.ValueKind == JsonValueKind.String ? ctp.GetString() ?? "image/png" : "image/png",
                 s.TryGetProperty("base64Content", out var b64) && b64.ValueKind == JsonValueKind.String ? b64.GetString() ?? string.Empty : string.Empty)).ToList()
             : new List<WorkerScreenshotDto>();
+        // Slice 11: healing attempts are supplementary; absent means no healing ran.
+        var healing = root.TryGetProperty("healingAttempts", out var healingEl) && healingEl.ValueKind == JsonValueKind.Array
+            ? healingEl.EnumerateArray().Select(ParseHealingAttempt).Where(h => h is not null).Select(h => h!).ToList()
+            : new List<WorkerHealingAttemptDto>();
         return new WorkerAssignmentResultDto(
             assignmentId,
             Str(root, "status") ?? "error",
@@ -174,7 +178,7 @@ public sealed class WorkerHttpTransport
             Str(root, "errorType"),
             Str(root, "errorMessage"),
             Long(root, "durationMs"),
-            steps, logs, shots);
+            steps, logs, shots, healing);
     }
 
     private static WorkerStepResultDto ParseStep(JsonElement s) => new(
@@ -185,7 +189,29 @@ public sealed class WorkerHttpTransport
         Long(s, "startedAtUnixMs"),
         Long(s, "completedAtUnixMs"),
         Long(s, "durationMs"),
-        Str(s, "errorMessage"));
+        Str(s, "errorMessage"),
+        Bool(s, "healed"),
+        Str(s, "recoveredTarget"),
+        Str(s, "healingStrategy"),
+        Bool(s, "aiAssisted"));
+
+    private static WorkerHealingAttemptDto? ParseHealingAttempt(JsonElement h)
+    {
+        if (h.ValueKind != JsonValueKind.Object) return null;
+        var order = Int(h, "stepOrder");
+        var action = Str(h, "action") ?? Str(h, "stepAction");
+        if (order < 1 || string.IsNullOrWhiteSpace(action)) return null;
+        return new WorkerHealingAttemptDto(
+            order, action,
+            Str(h, "originalStrategy"), Str(h, "originalValue"),
+            Str(h, "recoveredStrategy"), Str(h, "recoveredValue"),
+            Str(h, "healingStrategy") ?? "none",
+            Str(h, "status") ?? "Failed",
+            Int(h, "candidateCount"),
+            Bool(h, "wasApplied") ?? false,
+            Bool(h, "isAiAssisted") ?? false,
+            Str(h, "errorMessage"));
+    }
 
     private static WorkerLogDto ParseLog(JsonElement l) => new(
         Long(l, "seq"), Long(l, "timestampUnixMs"),
@@ -193,6 +219,10 @@ public sealed class WorkerHttpTransport
 
     private static string? Str(JsonElement e, string name)
         => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    private static bool? Bool(JsonElement e, string name)
+        => e.TryGetProperty(name, out var v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? v.GetBoolean() : null;
 
     private static int Int(JsonElement e, string name)
         => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n) ? n : 0;

@@ -39,6 +39,8 @@ public sealed class AutoTestAiDbContext : DbContext
     public DbSet<Ticket> Tickets => Set<Ticket>();
     public DbSet<Integration> Integrations => Set<Integration>();
     public DbSet<AutoTicketPolicy> AutoTicketPolicies => Set<AutoTicketPolicy>();
+    public DbSet<SelfHealingPolicy> SelfHealingPolicies => Set<SelfHealingPolicy>();
+    public DbSet<SelfHealingAttempt> SelfHealingAttempts => Set<SelfHealingAttempt>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -208,6 +210,27 @@ public sealed class AutoTestAiDbContext : DbContext
         modelBuilder.Entity<AutoTicketPolicy>().Property(p => p.Severities).HasMaxLength(200);
         modelBuilder.Entity<AutoTicketPolicy>().Property(p => p.DefectStatuses).HasMaxLength(200);
         modelBuilder.Entity<AutoTicketPolicy>().Property(p => p.Classifications).HasMaxLength(200);
+
+        // --- self-healing (Phase 2 Slice 11) ---
+        modelBuilder.Entity<SelfHealingPolicy>().ToTable("self_healing_policies");
+        // One policy per project: healing scope is always project-local.
+        modelBuilder.Entity<SelfHealingPolicy>().HasIndex(p => p.ProjectId).IsUnique();
+        modelBuilder.Entity<SelfHealingPolicy>().Property(p => p.AllowedStrategies).HasMaxLength(200);
+        modelBuilder.Entity<SelfHealingAttempt>().ToTable("self_healing_attempts");
+        modelBuilder.Entity<SelfHealingAttempt>().HasIndex(a => a.ProjectId);
+        modelBuilder.Entity<SelfHealingAttempt>().HasIndex(a => a.ExecutionId);
+        modelBuilder.Entity<SelfHealingAttempt>().HasIndex(a => a.TestCaseVersionId);
+        modelBuilder.Entity<SelfHealingAttempt>().HasIndex(a => a.CreatedAt);
+        // One authoritative outcome row per (execution test, step): concurrent
+        // workers converge instead of duplicating healing state.
+        modelBuilder.Entity<SelfHealingAttempt>()
+            .HasIndex(a => new { a.ExecutionTestId, a.StepOrder }).IsUnique();
+        modelBuilder.Entity<SelfHealingAttempt>().Property(a => a.Status).HasConversion<string>();
+        modelBuilder.Entity<SelfHealingAttempt>().Property(a => a.HealingStrategy).HasConversion<string>();
+        modelBuilder.Entity<SelfHealingAttempt>().Property(a => a.StepAction).HasMaxLength(200);
+        modelBuilder.Entity<SelfHealingAttempt>().Property(a => a.OriginalStrategy).HasMaxLength(50);
+        modelBuilder.Entity<SelfHealingAttempt>().Property(a => a.RecoveredStrategy).HasMaxLength(50);
+        modelBuilder.Entity<SelfHealingAttempt>().Property(a => a.ErrorMessage).HasMaxLength(2000);
 
         ApplyInMemoryJsonCompatibility(modelBuilder);
 

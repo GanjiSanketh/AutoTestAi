@@ -171,6 +171,14 @@ public class Slice1ApiFactory : WebApplicationFactory<Program>
             services.AddScoped<AutoTestAi.Application.Tickets.IAutoTicketQueryStore, AutoTestAi.Infrastructure.Tickets.EfAutoTicketQueryStore>();
             services.RemoveAll<AutoTestAi.Application.Reports.IReportQueryStore>();
             services.AddScoped<AutoTestAi.Application.Reports.IReportQueryStore, AutoTestAi.Infrastructure.Reports.EfReportQueryStore>();
+            services.RemoveAll<AutoTestAi.Application.ExecutionGrid.IGridWorkerStore>();
+            services.AddScoped<AutoTestAi.Application.ExecutionGrid.IGridWorkerStore, AutoTestAi.Infrastructure.ExecutionGrid.EfGridWorkerStore>();
+            services.RemoveAll<AutoTestAi.Application.ExecutionGrid.IGridAssignmentStore>();
+            services.AddScoped<AutoTestAi.Application.ExecutionGrid.IGridAssignmentStore, AutoTestAi.Infrastructure.ExecutionGrid.EfGridAssignmentStore>();
+            services.RemoveAll<AutoTestAi.Application.SelfHealing.ISelfHealingPolicyStore>();
+            services.AddScoped<AutoTestAi.Application.SelfHealing.ISelfHealingPolicyStore, AutoTestAi.Infrastructure.SelfHealing.EfSelfHealingPolicyStore>();
+            services.RemoveAll<AutoTestAi.Application.SelfHealing.ISelfHealingAttemptStore>();
+            services.AddScoped<AutoTestAi.Application.SelfHealing.ISelfHealingAttemptStore, AutoTestAi.Infrastructure.SelfHealing.EfSelfHealingAttemptStore>();
             services.AddSingleton<IExecutionWorkflowCoordinator>(WorkflowCoordinator);
             services.RemoveAll<ITestExecutionWorkflowStarter>();
             services.AddSingleton<ITestExecutionWorkflowStarter>(new FakeWorkflowStarter());

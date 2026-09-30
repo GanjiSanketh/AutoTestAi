@@ -52,6 +52,8 @@ public static class DependencyInjection
             services.AddScoped<Application.Reports.IReportQueryStore, Reports.EfReportQueryStore>();
             services.AddScoped<Application.ExecutionGrid.IGridWorkerStore, ExecutionGrid.EfGridWorkerStore>();
             services.AddScoped<Application.ExecutionGrid.IGridAssignmentStore, ExecutionGrid.EfGridAssignmentStore>();
+            services.AddScoped<Application.SelfHealing.ISelfHealingPolicyStore, SelfHealing.EfSelfHealingPolicyStore>();
+            services.AddScoped<Application.SelfHealing.ISelfHealingAttemptStore, SelfHealing.EfSelfHealingAttemptStore>();
         }
         else
         {
@@ -71,6 +73,8 @@ public static class DependencyInjection
             services.AddSingleton<Application.Reports.IReportQueryStore, Reports.UnavailableReportQueryStore>();
             services.AddSingleton<Application.ExecutionGrid.IGridWorkerStore, ExecutionGrid.UnavailableGridWorkerStore>();
             services.AddSingleton<Application.ExecutionGrid.IGridAssignmentStore, ExecutionGrid.UnavailableGridAssignmentStore>();
+            services.AddSingleton<Application.SelfHealing.ISelfHealingPolicyStore, SelfHealing.UnavailableSelfHealingPolicyStore>();
+            services.AddSingleton<Application.SelfHealing.ISelfHealingAttemptStore, SelfHealing.UnavailableSelfHealingAttemptStore>();
         }
 
         // Dapper remains referenced for future read-model queries (docs/04);

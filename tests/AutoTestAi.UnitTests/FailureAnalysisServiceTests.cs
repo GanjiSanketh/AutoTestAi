@@ -89,6 +89,9 @@ public sealed class FailureAnalysisServiceTests
             if (Failure is not null) throw Failure;
             return Task.FromResult(Result!);
         }
+
+        public Task<AiHealingResult> SuggestHealingCandidatesAsync(AiHealingRequest request, CancellationToken ct)
+            => throw new NotSupportedException();
     }
 
     private sealed class FakeResolver : IAiProviderResolver

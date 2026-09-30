@@ -16,6 +16,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { Browser, chromium, firefox, webkit } from 'playwright';
 import type { WorkerConfig } from './config.js';
 import { redactStepValue } from './redaction.js';
+import { ALLOWED_STRATEGIES, DEFAULT_POLICY, type SelfHealingPolicy } from './selfHealing.js';
 import {
   EngineAbort,
   PlaywrightPageAdapter,
@@ -27,6 +28,7 @@ import type {
   AssignmentStatus,
   WorkerAssignment,
   WorkerClassification,
+  WorkerHealingPolicy,
   WorkerLog,
   WorkerOutcomeStatus,
   WorkerResult,
@@ -140,6 +142,58 @@ export function createWorkerServer(config: WorkerConfig): {
     return launcher.launch({ headless: true });
   }
 
+  /**
+   * Slice 11 AI fallback: the worker never holds provider keys and never
+   * embeds vendor SDKs. When the assignment policy enables AI fallback, raw
+   * bounded redacted evidence is POSTed to the control-plane healing-suggest
+   * endpoint, which resolves the configured IAiProvider server-side. Auth is
+   * the per-assignment lease token (fencing: only the live lease holder can
+   * request candidates). Any failure here is a controlled healing failure.
+   */
+  function suggestAiFor(
+    assignment: WorkerAssignment,
+  ): ((envelope: {
+    action: string;
+    originalTarget: string;
+    domFragment: string;
+    attributes: string[];
+    nearbyText: string[];
+  }) => Promise<string>) | undefined {
+    const policy = normalizeHealingPolicy(assignment.healing);
+    if (!policy.enabled || !policy.aiFallbackEnabled) return undefined;
+    const baseUrl = (config.apiBaseUrl ?? '').trim().replace(/\/+$/, '');
+    if (!baseUrl) return undefined;
+    const assignmentId = assignment.assignmentId;
+    const token = assignment.assignmentToken;
+    return async (envelope) => {
+      const body = JSON.stringify({
+        action: envelope.action,
+        originalTarget: envelope.originalTarget,
+        domFragment: envelope.domFragment.slice(0, 4000),
+        attributes: envelope.attributes.slice(0, 20),
+        nearbyText: envelope.nearbyText.slice(0, 20),
+      });
+      const response = await fetch(
+        `${baseUrl}/api/v1/execution-grid/assignments/${encodeURIComponent(assignmentId)}/healing/suggest`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body,
+          signal: AbortSignal.timeout(config.healingAiTimeoutMs ?? 15000),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Healing-suggest endpoint returned HTTP ${response.status}.`);
+      }
+      const payload = (await response.json()) as { candidates?: unknown };
+      // Return the raw contract; the engine schema-validates before use.
+      return JSON.stringify({ candidates: payload.candidates ?? [] });
+    };
+  }
+
   async function runInBackground(record: AssignmentRecord): Promise<void> {
     const { assignment } = record;
     const startedAt = Date.now();
@@ -167,6 +221,11 @@ export function createWorkerServer(config: WorkerConfig): {
             },
             onLog: (level, message) => pushLog(record, level, message),
           },
+          healing: {
+            policy: normalizeHealingPolicy(assignment.healing),
+            suggestAi: suggestAiFor(assignment),
+            aiTimeoutMs: config.healingAiTimeoutMs ?? 15000,
+          },
         });
         const screenshots: WorkerScreenshot[] = [...run.screenshots];
         if (assignment.screenshotOnFinish && !run.failed) {
@@ -193,6 +252,7 @@ export function createWorkerServer(config: WorkerConfig): {
           stepResults: run.stepResults,
           logs: record.logs,
           screenshots,
+          healingAttempts: run.healingAttempts,
         };
         pushLog(
           record,
@@ -253,7 +313,48 @@ export function createWorkerServer(config: WorkerConfig): {
     for (const step of assignment.steps ?? []) {
       step.value = redactStepValue(step.action, step.target, step.value) ?? step.value;
     }
+    // Slice 11: normalize (never trust) the healing policy. Unknown fields are
+    // dropped; invalid values fall back to safe defaults (disabled).
+    try {
+      assignment.healing = normalizeHealingPolicy(assignment.healing ?? null) as WorkerHealingPolicy;
+    } catch {
+      assignment.healing = { ...DEFAULT_POLICY };
+    }
     return problems;
+  }
+
+  /**
+   * Slice 11: coerces an untrusted healing policy to safe values. Healing is
+   * disabled unless explicitly enabled; AI fallback stays off unless both the
+   * policy enables it and a suggest provider is wired. One-heal retry is
+   * enforced by the engine regardless of the supplied maxAttemptsPerStep.
+   */
+  function normalizeHealingPolicy(raw: unknown): SelfHealingPolicy {
+    if (!raw || typeof raw !== 'object') return { ...DEFAULT_POLICY };
+    const input = raw as Partial<WorkerHealingPolicy>;
+    const enabled = input.enabled === true;
+    const strategies = Array.isArray(input.allowedStrategies)
+      ? input.allowedStrategies
+          .filter((s): s is string => typeof s === 'string')
+          .map((s) => s.trim().toLowerCase())
+          .filter((s) => (ALLOWED_STRATEGIES as readonly string[]).includes(s))
+      : undefined;
+    const minScore =
+      typeof input.minDeterministicScore === 'number' && Number.isFinite(input.minDeterministicScore)
+        ? Math.min(100, Math.max(0, Math.floor(input.minDeterministicScore)))
+        : undefined;
+    const minConfidence =
+      typeof input.minAiConfidence === 'number' && Number.isFinite(input.minAiConfidence)
+        ? Math.min(1, Math.max(0, input.minAiConfidence))
+        : null;
+    return {
+      enabled,
+      aiFallbackEnabled: enabled && input.aiFallbackEnabled === true,
+      maxAttemptsPerStep: 1,
+      ...(minScore !== undefined ? { minDeterministicScore: minScore } : {}),
+      ...(minConfidence !== null ? { minAiConfidence: minConfidence } : {}),
+      ...(strategies && strategies.length > 0 ? { allowedStrategies: strategies } : {}),
+    };
   }
 
   const server = createServer((req, res) => {

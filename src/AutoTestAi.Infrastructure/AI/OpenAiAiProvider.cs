@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using AutoTestAi.Application.AI;
 using AutoTestAi.Application.FailureAnalysis;
+using AutoTestAi.Application.SelfHealing;
 using AutoTestAi.Application.TestGeneration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -28,6 +29,7 @@ public sealed class OpenAiAiProvider : IAiProvider
     private readonly IOptions<AiOptions> _options;
     private readonly IAiTestGenerationPromptBuilder _prompts;
     private readonly IAiFailureAnalysisPromptBuilder _analysisPrompts;
+    private readonly SelfHealingAiPromptBuilder _healingPrompts;
     private readonly ILogger<OpenAiAiProvider> _logger;
 
     public OpenAiAiProvider(
@@ -35,12 +37,14 @@ public sealed class OpenAiAiProvider : IAiProvider
         IOptions<AiOptions> options,
         IAiTestGenerationPromptBuilder prompts,
         IAiFailureAnalysisPromptBuilder analysisPrompts,
+        SelfHealingAiPromptBuilder healingPrompts,
         ILogger<OpenAiAiProvider> logger)
     {
         _httpClients = httpClients;
         _options = options;
         _prompts = prompts;
         _analysisPrompts = analysisPrompts;
+        _healingPrompts = healingPrompts;
         _logger = logger;
     }
 
@@ -98,6 +102,30 @@ public sealed class OpenAiAiProvider : IAiProvider
         return AiAnalysisResponseParser.Parse(
             ProviderName, model, content, prompt.PromptVersion,
             inputTokens, outputTokens, totalTokens ?? inputTokens + outputTokens);
+    }
+
+    public async Task<AiHealingResult> SuggestHealingCandidatesAsync(
+        AiHealingRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var (model, baseUrl, settings, apiKey) = RequireConfigured();
+        var prompt = _healingPrompts.Build(request);
+
+        var (content, inputTokens, outputTokens, totalTokens) = await PostChatAsync(
+            baseUrl, model, prompt.SystemPrompt, prompt.UserPrompt, apiKey, settings, cancellationToken);
+
+        // Log metadata only — never prompt bodies, responses, or the API key.
+        _logger.LogInformation("AI healing suggestion via {Provider} model {Model} completed.",
+            ProviderName, model);
+
+        var parsed = SelfHealingAiValidator.ParseOrThrow(
+            ProviderName, model, content, prompt.PromptVersion);
+        return parsed with
+        {
+            InputTokens = inputTokens,
+            OutputTokens = outputTokens,
+            TotalTokens = totalTokens ?? inputTokens + outputTokens,
+        };
     }
 
     private (string Model, string BaseUrl, AiOptions Settings, string ApiKey) RequireConfigured()

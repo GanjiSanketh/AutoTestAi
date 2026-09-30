@@ -22,4 +22,12 @@ public static class ExecutionEvents
     public const string ExecutionAssigned = "ExecutionAssigned";
     /// <summary>Phase 2 Slice 9: worker lifecycle/health changed.</summary>
     public const string WorkerStatusChanged = "WorkerStatusChanged";
+    /// <summary>
+    /// Phase 2 Slice 11: a step recovered via self-healing. Supplementary to
+    /// ExecutionLogReceived (which carries the granular self-healing.* log
+    /// stream); the stored test definition is unchanged.
+    /// </summary>
+    public const string SelfHealingApplied = "SelfHealingApplied";
+    /// <summary>Phase 2 Slice 11: healing was attempted but could not recover safely.</summary>
+    public const string SelfHealingFailed = "SelfHealingFailed";
 }

@@ -14,6 +14,8 @@ import {
   type ExecutionLogEntry,
   type ExecutionStep,
 } from '../../lib/api/endpoints/executions';
+import { selfHealingKeys } from '../../lib/api/endpoints/selfHealing';
+import { SelfHealingSection } from './SelfHealingSection';
 import {
   ExecutionEvent,
   createExecutionHubConnection,
@@ -111,6 +113,9 @@ export function ExecutionDetailsPage() {
     void queryClient.invalidateQueries({ queryKey: executionKeys.details(projectId, executionId) });
     void queryClient.invalidateQueries({ queryKey: executionKeys.artifacts(projectId, executionId) });
     void queryClient.invalidateQueries({ queryKey: executionKeys.logs(projectId, executionId) });
+    void queryClient.invalidateQueries({
+      queryKey: selfHealingKeys.attempts(projectId, executionId),
+    });
   };
 
   const cancel = useMutation({
@@ -193,6 +198,8 @@ export function ExecutionDetailsPage() {
       [ExecutionEvent.ExecutionStatusChanged]: () => invalidateAll(),
       [ExecutionEvent.ExecutionCompleted]: () => invalidateAll(),
       [ExecutionEvent.ExecutionFailed]: () => invalidateAll(),
+      [ExecutionEvent.SelfHealingApplied]: () => invalidateAll(),
+      [ExecutionEvent.SelfHealingFailed]: () => invalidateAll(),
     })
       .then(() => {
         if (!disposed) setConnectionError(null);
@@ -458,6 +465,8 @@ export function ExecutionDetailsPage() {
           </Card>
         </div>
       </div>
+
+      <SelfHealingSection projectId={projectId} executionId={executionId} active={!isTerminal} />
 
       {analyzable && (
         <FailureAnalysisSection

@@ -238,6 +238,45 @@ before local persistence, a bounded retry may create a second external
 issue; reclamation after an incomplete attempt is audited as ambiguous
 (`ticket.automation.recovered`) with the same warning.
 
+Slice-11 self-healing test engine (Phase 2, deterministic-first recovery):
+
+```text
+Locator failure on a healable action (click/fill/type/select/check/uncheck/press/assertVisible)
+  → eligibility predicate (locator-like signal, no assertion/env/auth/cancel signal)
+  → policy enabled? → bounded DOM snapshots (allowlisted attributes only, ≤60 nodes)
+  → deterministic candidates (testid → role → label → text → stable id/name)
+  → live-DOM validation: EXACTLY ONE visible+enabled action-compatible match
+  → none qualify + AI fallback enabled? → POST lease-token healing/suggest
+      → IAiProvider.SuggestHealingCandidatesAsync (bounded redacted evidence)
+      → schema + safety validation (allowlist, no code, bounds, min confidence)
+      → live-DOM validation (identical gates)
+  → exactly one safe candidate → ONE retry of the original action
+  → Applied (step passes, original target preserved in history) or Failed (original failure preserved)
+  → worker reports healingAttempts → engine persists fenced SelfHealingAttempt rows
+  → SignalR SelfHealingApplied + ExecutionLogReceived (self-healing.* stream)
+```
+
+Safety authority is deterministic validation, never the model: AI
+suggests locator DATA only; output is schema-validated and then
+validated against the live page with the same gates (zero/multi-match,
+hidden/disabled, incompatible element, unsupported strategy all
+reject). `first()`/`last()`/`nth()` ambiguity suppression is never
+used. Assertion failures, navigation, network/auth/environment faults,
+cancellations, and all non-Playwright scopes (mobile/API/DB/visual)
+never enter healing. At most one healing retry per step (engine guard);
+a failed retry preserves the original failure and flows into the
+normal Slice-6 classification → defect → Slice-10 ticketing pipeline
+unchanged (healed steps do not create defects). Recovered locators
+exist for the current run only — `test_case_versions` are never
+mutated (no autonomous test maintenance). Persistence is one outcome
+row per (execution test, step) with a unique index, so concurrent
+workers converge instead of duplicating state; stale leases are
+rejected by StartedAssignmentId/AssignmentToken fencing. Evidence is
+bounded (≤4000 chars) and redacted before AI transmission, persistence,
+logging, or audit; the worker never holds provider keys (AI resolves
+server-side via the existing provider abstraction). Normal passing
+steps pay no healing overhead (no per-step DB/AI/DOM work).
+
 ## 6. AI Provider Abstraction
 
 Business modules depend on an internal abstraction, not vendor SDKs.
@@ -251,6 +290,13 @@ public interface IAiProvider
 
     Task<AiAnalysisResult> AnalyzeFailureAsync(
         AiFailureAnalysisRequest request,
+        CancellationToken cancellationToken);
+
+    // Slice 11: locator recovery over bounded redacted DOM evidence.
+    // Returns locator DATA only (prompt self-healing-v1); the caller
+    // validates every candidate and never executes provider output.
+    Task<AiHealingResult> SuggestHealingCandidatesAsync(
+        AiHealingRequest request,
         CancellationToken cancellationToken);
 }
 ```
@@ -288,7 +334,7 @@ PostgreSQL remains the application system of record.
 
 ## 8. Real-Time
 
-SignalR provides execution status, live logs, worker state and other long-running operation updates. Access to project/execution channels must be authorized before subscription.
+SignalR provides execution status, live logs, worker state and other long-running operation updates. Access to project/execution channels must be authorized before subscription. Slice 11 reuses the existing hub (no second transport): the granular `self-healing.*` stream travels as execution logs, and `SelfHealingApplied` / `SelfHealingFailed` events supplement `ExecutionStepCompleted`; when the hub cannot carry a new event safely, logs remain authoritative.
 
 ## 9. Storage
 
@@ -306,7 +352,7 @@ Phase 1 uses Docker/Docker Compose. Later k3s/Kubernetes can scale API replicas,
 
 ## 12. Observability
 
-Use OpenTelemetry, Prometheus, Grafana, Loki and Tempo. Major operations carry correlation/execution IDs. Track API latency, AI latency, execution duration, worker utilization, pass/fail rate, flakiness, ticket latency, workflow failures and backlog.
+Use OpenTelemetry, Prometheus, Grafana, Loki and Tempo. Major operations carry correlation/execution IDs. Track API latency, AI latency, execution duration, worker utilization, pass/fail rate, flakiness, ticket latency, workflow failures and backlog. Slice 11 intentionally defers dedicated healing counters (`healing_attempts_total/success/failure/skipped`, `ai_healing_attempts_total`, `healing_duration`) to the structured `self-healing.*` execution-log stream plus `self-healing.*` audit events, which carry the same dimensions (execution/test/step/strategy/AI-assisted/outcome) through existing conventions; no new telemetry framework is introduced.
 
 ## 13. Authentication & Authorization (Slice 1)
 

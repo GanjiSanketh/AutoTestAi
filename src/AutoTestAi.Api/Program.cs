@@ -41,6 +41,8 @@ builder.Services.Configure<AutoTestAi.Application.Tickets.TicketOptions>(
     builder.Configuration.GetSection(AutoTestAi.Application.Tickets.TicketOptions.SectionName));
 builder.Services.Configure<AutoTestAi.Application.Tickets.AutoTicketOptions>(
     builder.Configuration.GetSection(AutoTestAi.Application.Tickets.AutoTicketOptions.SectionName));
+builder.Services.Configure<AutoTestAi.Application.SelfHealing.SelfHealingOptions>(
+    builder.Configuration.GetSection(AutoTestAi.Application.SelfHealing.SelfHealingOptions.SectionName));
 builder.Services.Configure<AutoTestAi.Infrastructure.Jira.JiraOptions>(
     builder.Configuration.GetSection(AutoTestAi.Infrastructure.Jira.JiraOptions.SectionName));
 builder.Services.Configure<ObservabilityOptions>(
@@ -225,6 +227,7 @@ app.MapFailureAnalysisEndpoints();
 app.MapDefectEndpoints();
 app.MapTicketEndpoints();
 app.MapAutoTicketEndpoints();
+app.MapSelfHealingEndpoints();
 app.MapDashboardEndpoints();
 app.MapExecutionGridEndpoints();
 app.MapHub<ExecutionHub>("/hubs/execution");

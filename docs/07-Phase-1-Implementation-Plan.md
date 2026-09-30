@@ -67,6 +67,21 @@ creation converges idempotently with automatic tickets. Ticket origin
 predictive flakiness/analytics, autonomous authoring/scheduling, or
 AI ticket decisions.
 
+### Phase 2 — Slice 11: Self-Healing Test Engine (implemented, Slice 11)
+Project-scoped self-healing policy (admin-configured, secret-safe,
+disabled by default) plus deterministic-first locator recovery inside
+the existing Playwright worker: eligibility gating, bounded redacted
+DOM evidence, ordered candidate generation, live-DOM validation with a
+single retry per step, and an optional policy-controlled AI fallback
+whose output is schema-validated and live-validated identically.
+Recovered locators apply to the current run only; stored test versions
+are never mutated. Fenced lease-scoped persistence
+(`self_healing_policies`, `self_healing_attempts`); existing
+classification, defect, ticketing, grid, cancellation, and SignalR
+contracts preserved. No autonomous test maintenance, predictive
+flakiness, self-authoring tests, mobile/API/visual healing, selector
+commits, arbitrary code execution, or new workflow/transport systems.
+
 ## 3. Definition of Done
 
 A feature is complete only when its backend endpoint, authorization, validation, migration, frontend integration, loading/empty/error states, tests, OpenAPI update and security/audit considerations are present. No production-looking hardcoded data remains.

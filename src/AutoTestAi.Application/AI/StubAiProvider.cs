@@ -80,6 +80,31 @@ public sealed class StubAiProvider : IAiProvider
             PromptVersion: AiPromptVersions.TestGenerationV1));
     }
 
+    public Task<AiHealingResult> SuggestHealingCandidatesAsync(
+        AiHealingRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Deterministic stub: never fabricates locators. Echoes at most one
+        // text candidate when the evidence names visible text, otherwise
+        // returns no candidates so callers exercise the safe-failure path.
+        // Never reports confidence: 0 (unknown) unless evidence is present.
+        var texts = request.Evidence.NearbyText
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Take(1)
+            .ToList();
+        var candidates = new List<AiHealingCandidate>();
+        if (texts.Count > 0 && request.AllowedStrategies.Contains("text"))
+            candidates.Add(new AiHealingCandidate("text", texts[0].Trim(), "Stub echo of observed text.", 0m));
+        return Task.FromResult(new AiHealingResult(
+            Provider: Name,
+            Model: "stub-1.0",
+            Candidates: candidates,
+            PromptVersion: AiPromptVersions.SelfHealingV1));
+    }
+
     public Task<AiAnalysisResult> AnalyzeFailureAsync(
         AiFailureAnalysisRequest request,
         CancellationToken cancellationToken)

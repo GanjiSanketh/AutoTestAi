@@ -17,6 +17,15 @@ export interface WorkerTimeouts {
   stepMs: number;
 }
 
+export interface WorkerHealingPolicy {
+  enabled: boolean;
+  aiFallbackEnabled: boolean;
+  maxAttemptsPerStep?: number | null;
+  minDeterministicScore?: number | null;
+  minAiConfidence?: number | null;
+  allowedStrategies?: string[] | null;
+}
+
 export interface WorkerAssignment {
   assignmentId: string;
   executionId: string;
@@ -28,6 +37,8 @@ export interface WorkerAssignment {
   screenshotOnFailure: boolean;
   screenshotOnFinish: boolean;
   assignmentToken: string;
+  /** Self-healing policy (Phase 2 Slice 11). Absent/disabled = pre-Slice-11 behavior. */
+  healing?: WorkerHealingPolicy | null;
 }
 
 export type WorkerStepStatus = 'passed' | 'failed' | 'skipped' | 'error';
@@ -53,6 +64,11 @@ export interface WorkerStepResult {
   completedAtUnixMs: number;
   durationMs: number;
   errorMessage?: string | null;
+  /** Slice 11: the stored target is never mutated; a healed step reports both. */
+  healed?: boolean | null;
+  recoveredTarget?: string | null;
+  healingStrategy?: string | null;
+  aiAssisted?: boolean | null;
 }
 
 export interface WorkerLog {
@@ -69,6 +85,21 @@ export interface WorkerScreenshot {
   base64Content: string;
 }
 
+export interface WorkerHealingAttempt {
+  stepOrder: number;
+  stepAction: string;
+  originalStrategy?: string | null;
+  originalValue?: string | null;
+  recoveredStrategy?: string | null;
+  recoveredValue?: string | null;
+  healingStrategy: string;
+  status: string;
+  candidateCount: number;
+  wasApplied: boolean;
+  isAiAssisted: boolean;
+  errorMessage?: string | null;
+}
+
 export interface WorkerResult {
   status: WorkerOutcomeStatus;
   classification: WorkerClassification;
@@ -78,6 +109,8 @@ export interface WorkerResult {
   stepResults: WorkerStepResult[];
   logs: WorkerLog[];
   screenshots: WorkerScreenshot[];
+  /** Slice 11: one outcome record per healed-attempted step (append-only, execution-scoped). */
+  healingAttempts?: WorkerHealingAttempt[] | null;
 }
 
 export type AssignmentStatus =

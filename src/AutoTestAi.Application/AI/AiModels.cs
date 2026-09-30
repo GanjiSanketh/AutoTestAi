@@ -18,6 +18,7 @@ public static class AiPromptVersions
 {
     public const string TestGenerationV1 = "test-generation-v1";
     public const string FailureAnalysisV1 = "failure-analysis-v1";
+    public const string SelfHealingV1 = "self-healing-v1";
 }
 
 /// <summary>
@@ -146,6 +147,48 @@ public sealed record AiAnalysisResult(
     IReadOnlyList<string>? Warnings = null,
     string? RecommendedAction = null,
     bool IsLikelyDefect = false,
+    string? PromptVersion = null,
+    long? InputTokens = null,
+    long? OutputTokens = null,
+    long? TotalTokens = null,
+    long LatencyMs = 0);
+
+/// <summary>
+/// Bounded redacted DOM evidence for locator recovery (Slice 11 §12).
+/// Built worker-side from observed attributes only; never the full DOM,
+/// never secrets, cookies, storage, or credentials.
+/// </summary>
+public sealed record AiHealingEvidence(
+    string Action,
+    string OriginalTarget,
+    string DomFragment,
+    IReadOnlyList<string> Attributes,
+    IReadOnlyList<string> NearbyText);
+
+/// <summary>
+/// Provider input for locator recovery. The server builds this — callers never
+/// supply provider, model, API key or system prompt (Slice 4 §2 pattern).
+/// </summary>
+public sealed record AiHealingRequest(
+    AiHealingEvidence Evidence,
+    IReadOnlyList<string> AllowedStrategies,
+    decimal? MinConfidence = null);
+
+/// <summary>One AI-suggested locator (data only — never executed as code).</summary>
+public sealed record AiHealingCandidate(
+    string Strategy,
+    string Value,
+    string? Reason,
+    decimal? Confidence);
+
+/// <summary>
+/// Normalized structured provider output for locator recovery (Slice 11 §13).
+/// The orchestrator validates every candidate before anything is used.
+/// </summary>
+public sealed record AiHealingResult(
+    string Provider,
+    string? Model,
+    IReadOnlyList<AiHealingCandidate> Candidates,
     string? PromptVersion = null,
     long? InputTokens = null,
     long? OutputTokens = null,

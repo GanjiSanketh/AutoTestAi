@@ -19,6 +19,8 @@ public sealed class ExecutionEventsTests
     [InlineData("FailureAnalysisCompleted", "FailureAnalysisCompleted")]
     [InlineData("ExecutionCompleted", "ExecutionCompleted")]
     [InlineData("ExecutionFailed", "ExecutionFailed")]
+    [InlineData("SelfHealingApplied", "SelfHealingApplied")]
+    [InlineData("SelfHealingFailed", "SelfHealingFailed")]
     public void EventNames_MatchApiContract(string expected, string actualField)
     {
         var value = typeof(ExecutionEvents)

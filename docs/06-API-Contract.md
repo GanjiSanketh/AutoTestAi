@@ -490,6 +490,57 @@ external creation is therefore NOT claimed; what IS guaranteed is
 at-most-one concurrent executor, single authoritative internal Ticket,
 bounded retries, no silent loss, and full auditability.
 
+### 10.2 Self-Healing (Phase 2 Slice 11)
+
+Deterministic-first execution-time locator recovery. Healing never
+mutates stored tests: it retries the original action once with a
+validated alternate locator, or preserves the original failure.
+
+```http
+GET /api/v1/projects/{projectId}/self-healing-policy
+PUT /api/v1/projects/{projectId}/self-healing-policy
+GET /api/v1/projects/{projectId}/self-healing-policy/status
+GET /api/v1/projects/{projectId}/executions/{executionId}/healing
+POST /api/v1/execution-grid/assignments/{assignmentRef}/healing/suggest
+```
+
+Policy upsert (`settings.manage`; reads require `executions.read`):
+
+```json
+{
+  "enabled": true,
+  "aiFallbackEnabled": false,
+  "minDeterministicScore": 50,
+  "minAiConfidence": 0.7,
+  "allowedStrategies": ["css", "xpath", "role", "text", "testid"]
+}
+```
+
+Rules: no policy (or `enabled: false`) means no healing -- the safe
+default, with zero per-step overhead. Only locator-plausible failures
+on healable Playwright actions qualify; assertion, navigation,
+network/auth, environment, cancellation, and non-Playwright scopes
+never heal. Deterministic candidates (test attributes, role, label,
+text, stable id/name) are validated against the live DOM first:
+exactly one visible, enabled, action-compatible match, otherwise
+reject (ambiguity is never suppressed with `first()`/`nth()`). AI
+fallback requires `aiFallbackEnabled` plus bounded redacted evidence
+(max 4000 chars, no secrets/cookies/storage/full DOM) and returns locator
+DATA only, schema-validated (`{candidates: [{strategy, value,
+reason}]}`; code/JS/unsupported strategies rejected) and live-validated
+identically -- confidence never overrides validation. One retry per
+step; healed steps pass with original targets preserved in history,
+failed healing preserves the original failure and flows into the
+normal classification-to-defect-to-ticket pipeline (healed steps do
+not create defects). Persistence is one fenced outcome row per
+(execution test, step); stale leases are rejected (`409`). The worker
+machine plane (`healing/suggest`) authenticates with the per-assignment
+lease token (unknown refs return `404`, mismatches `401`) and resolves the
+configured `IAiProvider` server-side -- the worker never holds provider
+keys. Audit events `self-healing.policy_configured/updated`,
+`self-healing.ai_suggested/ai_failed/ai_timeout`, and
+`self-healing.recorded` carry safe metadata only.
+
 ## 11. Integrations
 
 ```http
@@ -504,7 +555,14 @@ POST   /api/v1/integrations/{integrationId}/test
 
 Hub: `/hubs/execution`
 
-Events: `ExecutionStarted`, `ExecutionStatusChanged`, `ExecutionTestStarted`, `ExecutionStepStarted`, `ExecutionStepCompleted`, `ExecutionLogReceived`, `ExecutionTestCompleted`, `FailureAnalysisCompleted`, `ExecutionCompleted`, `ExecutionFailed`.
+Events: `ExecutionStarted`, `ExecutionStatusChanged`, `ExecutionTestStarted`, `ExecutionStepStarted`, `ExecutionStepCompleted`, `ExecutionLogReceived`, `ExecutionTestCompleted`, `FailureAnalysisCompleted`, `ExecutionCompleted`, `ExecutionFailed`, `ExecutionQueued`, `ExecutionAssigned`, `WorkerStatusChanged`, `SelfHealingApplied`, `SelfHealingFailed`.
+
+Slice 11 reuses the existing hub: the granular `self-healing.*`
+lifecycle (`started`, `candidate_generated/rejected/validated`,
+`applied`, `failed`, `skipped`) streams as execution logs, while
+`SelfHealingApplied` supplements step completion for applied
+recoveries. `ExecutionStepCompleted` step payloads carry additive
+`healed`, `recoveredTarget`, `healingStrategy`, and `aiAssisted` fields.
 
 The server authorizes access before a client subscribes to project/execution channels.
 The hub requires authentication; `SubscribeToExecution` verifies the execution

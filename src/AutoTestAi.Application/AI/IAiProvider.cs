@@ -16,4 +16,14 @@ public interface IAiProvider
     Task<AiAnalysisResult> AnalyzeFailureAsync(
         AiFailureAnalysisRequest request,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Suggests candidate locators from bounded redacted DOM evidence
+    /// (Phase 2 Slice 11). Returns locator DATA only; the caller validates
+    /// every candidate against the live DOM before use and never executes
+    /// provider output as code.
+    /// </summary>
+    Task<AiHealingResult> SuggestHealingCandidatesAsync(
+        AiHealingRequest request,
+        CancellationToken cancellationToken);
 }

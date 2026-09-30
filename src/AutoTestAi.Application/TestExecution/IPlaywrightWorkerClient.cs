@@ -7,6 +7,18 @@ public sealed record WorkerStepDto(int Order, string Action, string? Target, str
 
 public sealed record WorkerTimeoutsDto(int ExecutionMs, int StepMs);
 
+/// <summary>
+/// Worker-facing self-healing policy fragment (Phase 2 Slice 11).
+/// Absent or disabled reproduces pre-Slice-11 behavior exactly.
+/// </summary>
+public sealed record WorkerHealingPolicyDto(
+    bool Enabled,
+    bool AiFallbackEnabled,
+    int MaxAttemptsPerStep,
+    int? MinDeterministicScore,
+    decimal? MinAiConfidence,
+    IReadOnlyList<string> AllowedStrategies);
+
 public sealed record WorkerAssignmentDto(
     string AssignmentId,
     string ExecutionId,
@@ -17,7 +29,8 @@ public sealed record WorkerAssignmentDto(
     WorkerTimeoutsDto Timeouts,
     bool ScreenshotOnFailure,
     bool ScreenshotOnFinish,
-    Guid AssignmentToken);
+    Guid AssignmentToken,
+    WorkerHealingPolicyDto? Healing = null);
 
 public sealed record WorkerStepResultDto(
     int Order,
@@ -27,11 +40,30 @@ public sealed record WorkerStepResultDto(
     long StartedAtUnixMs,
     long CompletedAtUnixMs,
     long DurationMs,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    bool? Healed = null,
+    string? RecoveredTarget = null,
+    string? HealingStrategy = null,
+    bool? AiAssisted = null);
 
 public sealed record WorkerLogDto(long Seq, long TimestampUnixMs, string Level, string Message);
 
 public sealed record WorkerScreenshotDto(int? StepOrder, string FileName, string ContentType, string Base64Content);
+
+/// <summary>Worker-reported healing outcome for one step (Phase 2 Slice 11).</summary>
+public sealed record WorkerHealingAttemptDto(
+    int StepOrder,
+    string StepAction,
+    string? OriginalStrategy,
+    string? OriginalValue,
+    string? RecoveredStrategy,
+    string? RecoveredValue,
+    string HealingStrategy,
+    string Status,
+    int CandidateCount,
+    bool WasApplied,
+    bool IsAiAssisted,
+    string? ErrorMessage);
 
 public sealed record WorkerAssignmentResultDto(
     string AssignmentId,
@@ -42,7 +74,8 @@ public sealed record WorkerAssignmentResultDto(
     long DurationMs,
     IReadOnlyList<WorkerStepResultDto> StepResults,
     IReadOnlyList<WorkerLogDto> Logs,
-    IReadOnlyList<WorkerScreenshotDto> Screenshots);
+    IReadOnlyList<WorkerScreenshotDto> Screenshots,
+    IReadOnlyList<WorkerHealingAttemptDto>? HealingAttempts = null);
 
 public sealed record WorkerAssignmentProgressDto(
     string AssignmentId,

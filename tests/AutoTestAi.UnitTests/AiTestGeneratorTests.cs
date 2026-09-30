@@ -36,6 +36,9 @@ public sealed class AiTestGeneratorTests
 
         public Task<AiAnalysisResult> AnalyzeFailureAsync(AiFailureAnalysisRequest request, CancellationToken ct)
             => throw new NotSupportedException();
+
+        public Task<AiHealingResult> SuggestHealingCandidatesAsync(AiHealingRequest request, CancellationToken ct)
+            => throw new NotSupportedException();
     }
 
     private sealed class FakeResolver : IAiProviderResolver

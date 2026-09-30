@@ -162,3 +162,34 @@ public enum GridAssignmentStatus
     Expired = 5,
     Cancelled = 6
 }
+
+/// <summary>
+/// Self-healing attempt lifecycle (Phase 2 Slice 11). One row per
+/// (execution test, step) captures the final outcome; the granular
+/// candidate lifecycle lives in execution logs, not rows.
+/// </summary>
+public enum SelfHealingStatus
+{
+    NotEligible = 0,
+    CandidateGenerated = 1,
+    CandidateRejected = 2,
+    Applied = 3,
+    Failed = 4,
+    Skipped = 5,
+    PolicyDisabled = 6
+}
+
+/// <summary>
+/// Which strategy produced the recovered locator (Phase 2 Slice 11).
+/// None means no candidate qualified.
+/// </summary>
+public enum SelfHealingStrategy
+{
+    None = 0,
+    TestAttribute = 1,
+    Role = 2,
+    Label = 3,
+    Text = 4,
+    Structural = 5,
+    Ai = 6
+}

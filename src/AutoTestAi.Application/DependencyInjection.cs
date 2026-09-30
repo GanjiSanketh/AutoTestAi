@@ -27,6 +27,7 @@ public static class DependencyInjection
         services.AddSingleton<IAiFailureAnalysisPromptBuilder, AiFailureAnalysisPromptBuilder>();
         services.AddSingleton<AiGenerationValidator>();
         services.AddSingleton<AiAnalysisValidator>();
+        services.AddSingleton<SelfHealing.SelfHealingAiPromptBuilder>();
         services.AddSingleton<AiGenerationRateLimiter>();
         services.AddScoped<IAuthorizationService, AuthorizationService>();
         services.AddScoped<IExecutionSubscriptionAuthorizer, ExecutionSubscriptionAuthorizer>();
@@ -36,6 +37,8 @@ public static class DependencyInjection
         services.AddScoped<IExecutionEngine, ExecutionEngine>();
         services.AddScoped<IFailureEvidenceService, FailureEvidenceService>();
         services.AddScoped<IFailureAnalysisService, FailureAnalysisService>();
+        services.AddScoped<SelfHealing.ISelfHealingPolicyService, SelfHealing.SelfHealingPolicyService>();
+        services.AddScoped<SelfHealing.ISelfHealingService, SelfHealing.SelfHealingService>();
         services.AddScoped<IDefectService, DefectService>();
         services.AddScoped<Tickets.ITicketService, Tickets.TicketService>();
         services.AddScoped<Tickets.IJiraIntegrationService, Tickets.JiraIntegrationService>();
