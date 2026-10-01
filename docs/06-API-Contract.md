@@ -805,3 +805,38 @@ Secret metadata (secrets.manage for writes; values flow in on create/replace onl
 - GET /api/v1/secrets/{id}/exists - boolean only. PUT /api/v1/secrets/{id} - rename/replace/describe. DELETE /api/v1/secrets/{id}.
 
 Execution start (extended, not replaced): POST /api/v1/projects/{projectId}/executions accepts environmentId?, suiteId?, ariableOverrides? (flat key/value), secretRefOverrides? (key/secretRef; raw secrets return 400). Environment resolution: explicit id, else the project Active default, else 400 when overrides are present; legacy null-environment executions without overrides keep Phase 2 behavior. Steps support $ + {{ KEY }} placeholders; missing variables fail deterministically. CI/CD webhooks, Appium/mobile, and visual regression are NOT part of this contract.
+
+## Slice 3B - CI/CD Webhooks
+
+Provider-signed ingress (AllowAnonymous at HTTP; provider verification is the trust boundary).
+Secrets are write-only (stored as Slice 3A env_secret refs) and never appear in any response.
+
+- POST /api/v1/webhooks/{provider}/{projectId}/{integrationId} - provider in {github,gitlab,jenkins,azure}.
+  GitHub: X-Hub-Signature-256 (sha256=<hex> HMAC over raw body) + X-GitHub-Delivery.
+  GitLab: X-Gitlab-Token + X-Gitlab-Event-UUID (signing-token HMAC deferred).
+  Jenkins: Authorization Bearer token (or token header) + X-Jenkins-Delivery/Idempotency-Key (our convention; best-effort hash fallback documented).
+  Azure: Basic username/password (HTTPS) + notificationId delivery identity (no native HMAC).
+  202 accepted (durable delivery recorded), 200 duplicate/ignored, 401 auth failure,
+  404 unknown/disabled/mismatched integration, 413 oversized (>1 MB), 429 rate-limited.
+  The request never waits for test execution.
+
+- PUT /api/v1/projects/{projectId}/integrations/cicd (settings.manage) - body {provider, enabled,
+  defaultSuiteId?, defaultEnvironmentId?, eventAllowlist?, branchAllowlist?, repositoryAllowlist?,
+  variableMapping?, username?, secretMapping?, webhookSecret? (write-only; retained when omitted)}.
+  Returns metadata + hasSecret + deterministic webhookUrl; never secret values.
+- GET /api/v1/projects/{projectId}/integrations/cicd (executions.read) - all four providers metadata.
+- GET /api/v1/projects/{projectId}/integrations/cicd/{provider} (executions.read).
+- GET /api/v1/projects/{projectId}/integrations/cicd/{provider}/deliveries[?page&pageSize] (executions.read).
+- GET .../deliveries/{deliveryId} (executions.read).
+- POST .../deliveries/{deliveryId}/retry (settings.manage) - Failed deliveries only; idempotent re-drive.
+
+Processing: unique (integrationId,deliveryId) dedup; Received/Accepted/Triggered/Failed/Rejected/Duplicate/Ignored
+states with claim-lease crash recovery; event/branch/repository filtering before any execution; mandatory default
+suite (fan-out in persisted order, max 100, latest Approved versions, wh: idempotency keys, TriggerType.Ci via
+StartAsSystemAsync) + active environment (no legacy environment-less path); variable mapping from a closed
+normalized source set (BRANCH, COMMIT_SHA, REPOSITORY, EVENT_TYPE, CI_RUN_ID, PULL_REQUEST_NUMBER, BUILD_NUMBER);
+secret refs only from trusted configuration with project/environment ownership checks.
+Audit webhook.accepted/duplicate/rejected/authentication_failed/execution_requested/execution_failed/retry_requested/integration_configured/updated with safe metadata only.
+At-least-once provider delivery with idempotent processing; exactly-once is NOT claimed.
+Delivery retention default 90 days (purge job deferred). Appium/mobile, visual regression,
+scheduled execution, outbound CI status sync, and Slack/Teams are NOT part of this contract.

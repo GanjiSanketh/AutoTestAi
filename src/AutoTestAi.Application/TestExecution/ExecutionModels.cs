@@ -1,3 +1,5 @@
+using AutoTestAi.Domain.Enums;
+
 namespace AutoTestAi.Application.TestExecution;
 
 // ---------- Commands ----------
@@ -14,7 +16,8 @@ public sealed record StartExecutionCommand(
     string? IdempotencyKey = null,
     Guid? SuiteId = null,
     IReadOnlyDictionary<string, string>? VariableOverrides = null,
-    IReadOnlyDictionary<string, string>? SecretRefOverrides = null);
+    IReadOnlyDictionary<string, string>? SecretRefOverrides = null,
+    TriggerType? Trigger = null);
 
 public sealed record ExecutionFilters(
     string? Status,
@@ -129,6 +132,14 @@ public sealed record ArtifactDownloadDto(
 public interface ITestExecutionService
 {
     Task<StartExecutionResultDto> StartAsync(StartExecutionCommand command, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// System-initiated start (Phase 3 Slice 3B webhook fan-out). Runs the
+    /// identical pipeline (approval gate, environment/suite validation,
+    /// envelopes, workflow start) without requiring a human user session.
+    /// Only callable server-side; never exposed with user-supplied auth bypass.
+    /// </summary>
+    Task<StartExecutionResultDto> StartAsSystemAsync(StartExecutionCommand command, CancellationToken cancellationToken);
 
     Task<Common.PagedResult<ExecutionListItemDto>> ListAsync(
         Guid projectId, int page, int pageSize, ExecutionFilters filters, CancellationToken cancellationToken);

@@ -96,7 +96,10 @@ users/projects → audit_events
 `id UUID PK`, `project_id FK`, `execution_id FK`, `execution_test_id FK`, `test_case_id`, `test_case_version_id NULL` (snapshot reference — versions are never mutated by healing), `step_order`, `step_action` (≤200), `original_strategy` (≤50), `original_value` (bounded, redacted), `recovered_strategy` (≤50), `recovered_value` (bounded, redacted), `healing_strategy` (None/TestAttribute/Role/Label/Text/Structural/Ai), `status` (Applied/Failed persisted; granular candidate lifecycle lives in execution logs), `candidate_count`, `was_applied`, `is_ai_assisted`, `error_message` (≤2000, redacted), `assignment_id NULL` (lease that owned the run; NULL = legacy lease-free worker), timestamps. Unique `(execution_test_id,step_order)` (one authoritative outcome per step; concurrent workers converge); indexes on `project_id`, `execution_id`, `test_case_version_id`, `created_at`. Never stores raw DOM, screenshots per candidate, full prompts, or secrets.
 
 ### integrations
-`id UUID PK`, `project_id`, `provider`, `integration_type`, `configuration JSONB`, `secret_reference`, `status`, timestamps. Slice 7 Jira shape: `configuration = {baseUrl, projectKey, email, issueType, priorityMapping, appBaseUrl?}` (no secrets — the API token lives in `secret_reference` server-side only); unique filtered `(project_id,provider) WHERE project_id IS NOT NULL` (one Jira row per project).
+`id UUID PK`, `project_id`, `provider`, `integration_type`, `configuration JSONB`, `secret_reference`, `status`, timestamps. Slice 7 Jira shape: `configuration = {baseUrl, projectKey, email, issueType, priorityMapping, appBaseUrl?}` (no secrets — the API token lives in `secret_reference` server-side only); unique filtered `(project_id,provider) WHERE project_id IS NOT NULL` (one Jira row per project). Slice 3B CI/CD shape: `integration_type='cicd'`, `provider ∈ {github, gitlab, jenkins, azure}` (one row per provider per project via the same unique index), `configuration = {defaultSuiteId?, defaultEnvironmentId?, eventAllowlist[], branchAllowlist[], repositoryAllowlist[], variableMapping{}, username?, secretMapping{}}`; `secret_reference` holds ONLY an opaque Slice 3A reference (`env_secret:<id>`, provisioned as `CI_WEBHOOK_<PROVIDER>` in the default environment) — never plaintext.
+
+### webhook_deliveries (Slice 3B)
+`id UUID PK`, `integration_id FK`, `project_id FK`, `provider` (≤50), `delivery_id` (≤200, provider-scoped: GitHub delivery UUID, GitLab event UUID, Azure notification id, Jenkins caller id or derived hash), `event_type` (≤200), `received_at`, `payload_hash` (SHA-256 hex of the raw body; the raw body itself is never persisted), `verification_status` (Pending/Verified/Failed), `processing_status` (Received/Accepted/Triggered/Failed/Rejected/Duplicate/Ignored), `normalized_metadata_json NULL` (redacted branch/commit/repo/actor/filter outcome only), `execution_id NULL` (first fanned-out execution), `triggered_count`, `failure_reason NULL` (≤500, safe codes only), `processed_at NULL`, `claim_token NULL` + `claim_expires_at NULL` (crash-recovery lease), `row_version` (optimistic concurrency), timestamps. Unique `IX_webhook_deliveries_Integration_Delivery (integration_id,delivery_id)` (authoritative duplicate boundary); indexes on `project_id`, `integration_id`, `processing_status`, `received_at`, `execution_id`. No secrets, signatures, headers, or payloads. Retention default 90 days (purge job deferred — documented).
 
 ### grid_workers (Slice 9)
 `id UUID PK`, `worker_key VARCHAR(100) UNIQUE`, `display_name`, `worker_type`, `framework`, `browsers text[]`, `version`, `status`, `capacity`, `active_assignment_count`, `last_heartbeat_at`, `credential_hash`, `credential_salt`, `base_url`, `row_version` (concurrency token), `created_at`, `updated_at`. Index on `status`, `last_heartbeat_at`; unique on `worker_key`.
@@ -148,6 +151,10 @@ Slice 3A adds `variable_sets`, `environment_secrets`, and
 `execution_variables` (one additive migration, no changes to historical
 rows; `executions.environment_id` stays nullable for legacy
 environment-less executions).
+
+Slice 3B adds `webhook_deliveries` (one additive migration: table + unique
+`(integration_id,delivery_id)` + five secondary indexes). No existing
+table is altered; Jira rows and Slice 3A secret tables are untouched.
 
 ## 5. JSONB
 

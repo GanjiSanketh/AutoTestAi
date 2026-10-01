@@ -83,15 +83,25 @@ public sealed class TestExecutionService : ITestExecutionService
         _secrets = secrets;
     }
 
-    public async Task<StartExecutionResultDto> StartAsync(
+    public Task<StartExecutionResultDto> StartAsync(
         StartExecutionCommand command, CancellationToken cancellationToken)
+        => StartCoreAsync(command, requireAuthorization: true, cancellationToken);
+
+    public Task<StartExecutionResultDto> StartAsSystemAsync(
+        StartExecutionCommand command, CancellationToken cancellationToken)
+        => StartCoreAsync(command, requireAuthorization: false, cancellationToken);
+
+    private async Task<StartExecutionResultDto> StartCoreAsync(
+        StartExecutionCommand command, bool requireAuthorization, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
 
         // Authorize first so existence/probe behavior never leaks across projects
         // (preserves the Slice-1 convention: unknown projects yield 403, not 404).
-        await _authorization.RequireProjectAccessAsync(
-            command.ProjectId, Permissions.ExecutionsExecute, cancellationToken);
+        // System callers (webhook fan-out) run server-side without a user session.
+        if (requireAuthorization)
+            await _authorization.RequireProjectAccessAsync(
+                command.ProjectId, Permissions.ExecutionsExecute, cancellationToken);
 
         var normalized = NormalizeAndValidate(command);
 
@@ -211,7 +221,8 @@ public sealed class TestExecutionService : ITestExecutionService
         var execution = new Execution
         {
             ProjectId = normalized.ProjectId,
-            TriggerType = TriggerType.Manual,
+            TriggerType = normalized.Trigger ?? TriggerType.Manual,
+            SuiteId = resolvedSuiteId,
             EnvironmentId = resolvedEnvironmentId,
             Status = ExecutionStatus.Queued,
             IdempotencyKey = normalized.IdempotencyKey,

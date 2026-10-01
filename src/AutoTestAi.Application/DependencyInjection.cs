@@ -52,6 +52,12 @@ public static class DependencyInjection
         services.AddScoped<Variables.IVariableSetService, Variables.VariableSetService>();
         services.AddScoped<Variables.IVariableResolutionService, Variables.VariableResolutionService>();
         services.AddScoped<Secrets.ISecretMetadataService, Secrets.SecretMetadataService>();
+        services.AddSingleton<Webhooks.WebhookQueue>();
+        services.AddSingleton<Webhooks.WebhookRateLimiter>();
+        services.AddScoped<Webhooks.ICiIntegrationService, Webhooks.CiIntegrationService>();
+        services.AddScoped<Webhooks.IWebhookIngestionService, Webhooks.WebhookIngestionService>();
+        services.AddScoped<Webhooks.IWebhookProcessingService, Webhooks.WebhookProcessingService>();
+        services.AddScoped<Webhooks.IWebhookDeliveryQueryService, Webhooks.WebhookDeliveryQueryService>();
         services.AddScoped<ExecutionGrid.IExecutionGridService, ExecutionGrid.ExecutionGridService>();
         services.AddScoped<ExecutionGrid.IGridScheduler, ExecutionGrid.GridScheduler>();
         services.AddScoped<ExecutionGrid.IGridLeaseManager, ExecutionGrid.GridLeaseManager>();

@@ -470,3 +470,56 @@ Limitations: secrets baked into screenshot pixels cannot be scrubbed in 3A
 policy prefers password-type inputs and forbids secrets in URLs.
 CI/CD webhooks, Appium/mobile, and visual regression are explicitly NOT part
 of Slice 3A.
+
+## 15. CI/CD Webhooks & Execution Triggering (Phase 3 Slice 3B)
+
+Inbound-only CI ingress reusing the `Integration` aggregate
+(`integration_type='cicd'`, `provider ∈ {github,gitlab,jenkins,azure}`; the
+existing unique `(project_id,provider)` index yields one row per provider
+per project). `CiIntegrationConfig` (JSONB) carries default suite /
+environment, event / branch / repository allowlists, variable mapping
+(`TARGET=SOURCE` over a closed source set), optional Basic username, and
+secret mapping (opaque `env_secret:<id>` only); provider secrets are
+provisioned as `CI_WEBHOOK_<PROVIDER>` Slice 3A environment secrets and
+resolved at runtime via `ISecretResolver` (in-memory, constant-time
+compare, discarded after verification) — stricter than the Slice 7 Jira
+raw-token precedent.
+
+`POST /api/v1/webhooks/{provider}/{projectId}/{integrationId}` is
+`AllowAnonymous` at the HTTP layer (providers hold no user session);
+provider verification is the trust boundary: GitHub HMAC-SHA256 over raw
+bytes (`X-Hub-Signature-256` + `X-GitHub-Delivery`), GitLab plaintext token
+(`X-Gitlab-Token` + `X-Gitlab-Event-UUID`; HMAC signing deferred),
+Jenkins configured bearer token (`Authorization: Bearer` / `token` header;
+`X-Jenkins-Delivery`/`Idempotency-Key` is OUR convention with a documented
+best-effort hash fallback), Azure Basic over HTTPS (username in config,
+password via secret ref; `notificationId` delivery identity; no native
+HMAC claimed). Guards run before expensive work: 1 MB bounded body, 100
+deliveries/min/project process-local budget (DB constraint is the
+correctness boundary), project/integration/active/type/provider cross-checks
+(404 without enumeration).
+
+Each accepted delivery persists one `WebhookDelivery` (hash + redacted
+normalized metadata only — no raw body, headers, signatures, or secrets)
+and returns 202; duplicates return 200 without new rows or executions
+(unique `(integration_id,delivery_id)` + unique-violation convergence,
+multi-instance safe). `WebhookBackgroundService` drains the Channel handoff
+and reconciles stale `Accepted` rows via claim-token leases
+(`StartAsSystemAsync` runs the unchanged execution pipeline with
+`TriggerType.Ci`; manual callers keep `Manual` default; `Execution.SuiteId`
+is now populated for suite runs). Fan-out resolves suite members in
+persisted `(ExecutionOrder, TestCaseId)` order, caps at 100 (fail closed,
+no partial execution), binds each member's latest `Approved` version, and
+uses deterministic `wh:{integration}:{delivery}:{index}` execution
+idempotency keys (≤100 chars) so retries converge; Temporal
+`test-execution-{executionId}` IDs add a further idempotency layer.
+At-least-once provider delivery + idempotent processing is documented
+honestly — global exactly-once is NOT claimed. Management
+(`settings.manage`) and history/retry (`executions.read` reads,
+`settings.manage` retry of `Failed` only) plus `CiCdSettings` UI follow
+existing Settings patterns with write-only secrets. Metrics
+`webhook_{received,rejected,duplicate,triggered,failed}_total` +
+`webhook_processing_duration` carry provider/reason labels only.
+Retention defaults to 90 days; the purge job is deferred and documented.
+Out of scope: scheduled execution, outbound CI status sync, Slack/Teams,
+Azure DevOps ticketing, mobile/Appium, visual regression.

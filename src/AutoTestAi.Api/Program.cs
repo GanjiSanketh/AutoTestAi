@@ -45,6 +45,8 @@ builder.Services.Configure<AutoTestAi.Application.SelfHealing.SelfHealingOptions
     builder.Configuration.GetSection(AutoTestAi.Application.SelfHealing.SelfHealingOptions.SectionName));
 builder.Services.Configure<AutoTestAi.Infrastructure.Jira.JiraOptions>(
     builder.Configuration.GetSection(AutoTestAi.Infrastructure.Jira.JiraOptions.SectionName));
+builder.Services.Configure<AutoTestAi.Application.Webhooks.WebhookOptions>(
+    builder.Configuration.GetSection(AutoTestAi.Application.Webhooks.WebhookOptions.SectionName));
 builder.Services.Configure<ObservabilityOptions>(
     builder.Configuration.GetSection(ObservabilityOptions.SectionName));
 
@@ -142,6 +144,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, HttpCurrentUserService>();
 builder.Services.AddScoped<AutoTestAi.Application.TestExecution.IExecutionEventPublisher, AutoTestAi.Api.Hubs.SignalRExecutionEventPublisher>();
 builder.Services.AddHostedService<AutoTestAi.Api.Services.AutoTicketBackgroundService>();
+builder.Services.AddHostedService<AutoTestAi.Api.Services.WebhookBackgroundService>();
 
 // ---------- health (STEP 21) ----------
 builder.Services.AddHealthChecks()
@@ -232,6 +235,7 @@ app.MapAutoTicketEndpoints();
 app.MapSelfHealingEndpoints();
 app.MapDashboardEndpoints();
 app.MapExecutionGridEndpoints();
+app.MapWebhookEndpoints();
 app.MapHub<ExecutionHub>("/hubs/execution");
 
 if (!authOptions.Configured)

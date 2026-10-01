@@ -175,6 +175,32 @@ public enum VariableScopeType
 }
 
 /// <summary>
+/// Provider authentication outcome for a webhook delivery (Phase 3 Slice 3B).
+/// </summary>
+public enum WebhookVerificationStatus
+{
+    Pending = 0,
+    Verified = 1,
+    Failed = 2
+}
+
+/// <summary>
+/// Delivery processing lifecycle (Phase 3 Slice 3B). Terminal states are
+/// final: Triggered, Failed, Rejected, Duplicate, Ignored. Accepted rows are
+/// reclaimable by crash recovery until they reach a terminal state.
+/// </summary>
+public enum WebhookProcessingStatus
+{
+    Received = 0,
+    Accepted = 1,
+    Triggered = 2,
+    Failed = 3,
+    Rejected = 4,
+    Duplicate = 5,
+    Ignored = 6
+}
+
+/// <summary>
 /// Self-healing attempt lifecycle (Phase 2 Slice 11). One row per
 /// (execution test, step) captures the final outcome; the granular
 /// candidate lifecycle lives in execution logs, not rows.

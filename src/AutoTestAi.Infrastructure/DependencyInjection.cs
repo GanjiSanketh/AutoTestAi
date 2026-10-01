@@ -62,6 +62,8 @@ public static class DependencyInjection
             services.AddScoped<IVariableSetStore, EfVariableSetStore>();
             services.AddScoped<IExecutionVariablesStore, EfExecutionVariablesStore>();
             services.AddScoped<ITestSuiteLookup, EfTestSuiteLookup>();
+            services.AddScoped<Application.Webhooks.IWebhookDeliveryStore, Webhooks.EfWebhookDeliveryStore>();
+            services.AddScoped<Application.Webhooks.ISuiteMemberLookup, Webhooks.EfSuiteMemberLookup>();
             // Slice 3A: one vault class, two narrow capabilities. Execution
             // code resolves ISecretResolver; management resolves ISecretStore.
             services.AddScoped<EfSecretVault>();
@@ -91,6 +93,8 @@ public static class DependencyInjection
             services.AddSingleton<IVariableSetStore, Variables.UnavailableVariableSetStore>();
             services.AddSingleton<IExecutionVariablesStore, Variables.UnavailableExecutionVariablesStore>();
             services.AddSingleton<ITestSuiteLookup, Variables.UnavailableTestSuiteLookup>();
+            services.AddSingleton<Application.Webhooks.IWebhookDeliveryStore, Webhooks.UnavailableWebhookDeliveryStore>();
+            services.AddSingleton<Application.Webhooks.ISuiteMemberLookup, Webhooks.UnavailableSuiteMemberLookup>();
             services.AddSingleton<ISecretResolver, Secrets.UnavailableSecretResolver>();
             services.AddSingleton<ISecretStore, Secrets.UnavailableSecretStore>();
         }
@@ -119,6 +123,13 @@ public static class DependencyInjection
         // Slice 7: Jira ticketing boundary (manual creation only; token server-side).
         services.AddHttpClient(Jira.JiraTicketProvider.HttpClientName);
         services.AddTransient<Application.Tickets.IJiraTicketProvider, Jira.JiraTicketProvider>();
+
+        // Slice 3B: CI/CD webhook provider adapters (no HTTP clients — inbound only).
+        services.AddTransient<Application.Webhooks.ICiWebhookProvider, Webhooks.Providers.GithubWebhookProvider>();
+        services.AddTransient<Application.Webhooks.ICiWebhookProvider, Webhooks.Providers.GitlabWebhookProvider>();
+        services.AddTransient<Application.Webhooks.ICiWebhookProvider, Webhooks.Providers.JenkinsWebhookProvider>();
+        services.AddTransient<Application.Webhooks.ICiWebhookProvider, Webhooks.Providers.AzureWebhookProvider>();
+        services.AddTransient<Webhooks.Providers.CiWebhookProviderResolver>();
 
         return services;
     }

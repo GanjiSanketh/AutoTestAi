@@ -44,6 +44,7 @@ public sealed class AutoTestAiDbContext : DbContext
     public DbSet<VariableSet> VariableSets => Set<VariableSet>();
     public DbSet<EnvironmentSecret> EnvironmentSecrets => Set<EnvironmentSecret>();
     public DbSet<ExecutionVariables> ExecutionVariables => Set<ExecutionVariables>();
+    public DbSet<WebhookDelivery> WebhookDeliveries => Set<WebhookDelivery>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -276,6 +277,28 @@ public sealed class AutoTestAiDbContext : DbContext
         modelBuilder.Entity<EnvironmentSecret>().Property(s => s.RowVersion).IsRowVersion();
         modelBuilder.Entity<ExecutionVariables>().ToTable("execution_variables");
         modelBuilder.Entity<ExecutionVariables>().HasKey(e => e.ExecutionId);
+
+        // --- CI/CD webhook deliveries (Phase 3 Slice 3B, additive) ---
+        modelBuilder.Entity<WebhookDelivery>().ToTable("webhook_deliveries");
+        // Authoritative duplicate boundary: provider delivery ids are scoped
+        // per integration, never per project alone.
+        modelBuilder.Entity<WebhookDelivery>()
+            .HasIndex(d => new { d.IntegrationId, d.DeliveryId })
+            .IsUnique()
+            .HasDatabaseName("IX_webhook_deliveries_Integration_Delivery");
+        modelBuilder.Entity<WebhookDelivery>().HasIndex(d => d.ProjectId);
+        modelBuilder.Entity<WebhookDelivery>().HasIndex(d => d.IntegrationId);
+        modelBuilder.Entity<WebhookDelivery>().HasIndex(d => d.ProcessingStatus);
+        modelBuilder.Entity<WebhookDelivery>().HasIndex(d => d.ReceivedAt);
+        modelBuilder.Entity<WebhookDelivery>().HasIndex(d => d.ExecutionId);
+        modelBuilder.Entity<WebhookDelivery>().Property(d => d.Provider).HasMaxLength(50);
+        modelBuilder.Entity<WebhookDelivery>().Property(d => d.DeliveryId).HasMaxLength(200);
+        modelBuilder.Entity<WebhookDelivery>().Property(d => d.EventType).HasMaxLength(200);
+        modelBuilder.Entity<WebhookDelivery>().Property(d => d.PayloadHash).HasMaxLength(128);
+        modelBuilder.Entity<WebhookDelivery>().Property(d => d.FailureReason).HasMaxLength(500);
+        modelBuilder.Entity<WebhookDelivery>().Property(d => d.VerificationStatus).HasConversion<string>();
+        modelBuilder.Entity<WebhookDelivery>().Property(d => d.ProcessingStatus).HasConversion<string>();
+        modelBuilder.Entity<WebhookDelivery>().Property(d => d.RowVersion).IsConcurrencyToken();
 
         // --- audit ---
         modelBuilder.Entity<AuditEvent>().ToTable("audit_events");

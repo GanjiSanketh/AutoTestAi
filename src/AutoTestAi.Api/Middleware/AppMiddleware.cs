@@ -59,6 +59,8 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Ex
             AutoTestAi.Application.Common.NotFoundException => (HttpStatusCode.NotFound, "NOT_FOUND", ex.Message, (IReadOnlyList<object>)Array.Empty<object>()),
             AutoTestAi.Application.AI.AiProviderException ai => MapAiProviderError(ai),
             AutoTestAi.Application.Tickets.RateLimitedException => (HttpStatusCode.TooManyRequests, "RATE_LIMITED", ex.Message, (IReadOnlyList<object>)Array.Empty<object>()),
+            AutoTestAi.Application.Webhooks.WebhookRateLimitedException => (HttpStatusCode.TooManyRequests, "RATE_LIMITED", ex.Message, (IReadOnlyList<object>)Array.Empty<object>()),
+            AutoTestAi.Application.Webhooks.WebhookTooLargeException => (HttpStatusCode.RequestEntityTooLarge, "PAYLOAD_TOO_LARGE", ex.Message, (IReadOnlyList<object>)Array.Empty<object>()),
             AutoTestAi.Application.Tickets.JiraProviderException jira => MapJiraError(jira),
             ArgumentException => (HttpStatusCode.BadRequest, "VALIDATION_ERROR", ex.Message, (IReadOnlyList<object>)Array.Empty<object>()),
             InvalidOperationException invalidOp => (HttpStatusCode.ServiceUnavailable, "DEPENDENCY_UNAVAILABLE", FriendlyDependencyMessage(invalidOp), (IReadOnlyList<object>)Array.Empty<object>()),

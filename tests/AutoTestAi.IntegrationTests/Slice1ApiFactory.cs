@@ -120,6 +120,7 @@ public class Slice1ApiFactory : WebApplicationFactory<Program>
                 ["Authentication:Audience"] = "autotestai-api",
                 ["Authentication:RequireHttpsMetadata"] = "false",
                 ["Temporal:Enabled"] = "false",
+                ["Webhooks:BackgroundProcessingEnabled"] = "false",
             }));
         builder.ConfigureTestServices(services =>
         {
@@ -185,6 +186,10 @@ public class Slice1ApiFactory : WebApplicationFactory<Program>
             services.AddScoped<AutoTestAi.Application.Variables.IExecutionVariablesStore, AutoTestAi.Infrastructure.Variables.EfExecutionVariablesStore>();
             services.RemoveAll<AutoTestAi.Application.Variables.ITestSuiteLookup>();
             services.AddScoped<AutoTestAi.Application.Variables.ITestSuiteLookup, AutoTestAi.Infrastructure.Variables.EfTestSuiteLookup>();
+            services.RemoveAll<AutoTestAi.Application.Webhooks.IWebhookDeliveryStore>();
+            services.AddScoped<AutoTestAi.Application.Webhooks.IWebhookDeliveryStore, AutoTestAi.Infrastructure.Webhooks.EfWebhookDeliveryStore>();
+            services.RemoveAll<AutoTestAi.Application.Webhooks.ISuiteMemberLookup>();
+            services.AddScoped<AutoTestAi.Application.Webhooks.ISuiteMemberLookup, AutoTestAi.Infrastructure.Webhooks.EfSuiteMemberLookup>();
             services.RemoveAll<AutoTestAi.Application.Secrets.ISecretResolver>();
             services.RemoveAll<AutoTestAi.Application.Secrets.ISecretStore>();
             services.AddScoped<AutoTestAi.Infrastructure.Secrets.EfSecretVault>();
