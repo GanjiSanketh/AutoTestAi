@@ -52,6 +52,9 @@ public static class DependencyInjection
         services.AddScoped<Variables.IVariableSetService, Variables.VariableSetService>();
         services.AddScoped<Variables.IVariableResolutionService, Variables.VariableResolutionService>();
         services.AddScoped<Secrets.ISecretMetadataService, Secrets.SecretMetadataService>();
+        services.AddScoped<Mobile.IMobilePoolService, Mobile.MobilePoolService>();
+        services.AddScoped<Mobile.IMobileDeviceService, Mobile.MobileDeviceService>();
+        services.AddScoped<Mobile.IMobileAppService, Mobile.MobileAppService>();
         services.AddSingleton<Webhooks.WebhookQueue>();
         services.AddSingleton<Webhooks.WebhookRateLimiter>();
         services.AddScoped<Webhooks.ICiIntegrationService, Webhooks.CiIntegrationService>();

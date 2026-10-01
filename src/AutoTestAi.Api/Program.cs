@@ -236,6 +236,7 @@ app.MapSelfHealingEndpoints();
 app.MapDashboardEndpoints();
 app.MapExecutionGridEndpoints();
 app.MapWebhookEndpoints();
+app.MapMobileEndpoints();
 app.MapHub<ExecutionHub>("/hubs/execution");
 
 if (!authOptions.Configured)

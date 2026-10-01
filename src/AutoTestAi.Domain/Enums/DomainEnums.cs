@@ -201,6 +201,70 @@ public enum WebhookProcessingStatus
 }
 
 /// <summary>
+/// Mobile platform scope (Phase 3 Slice 3C). Closed set: android | ios.
+/// Stored as string; validated at the application boundary.
+/// </summary>
+public enum MobilePlatform
+{
+    Android = 0,
+    Ios = 1
+}
+
+/// <summary>Administrative lifecycle for a mobile device pool.</summary>
+public enum MobilePoolStatus
+{
+    Active = 0,
+    Disabled = 1
+}
+
+/// <summary>
+/// Mobile device lifecycle (Phase 3 Slice 3C). Available/Unhealthy/Offline
+/// are worker-derived in future slices; registry CRUD toggles
+/// Disabled/Available only.
+/// </summary>
+public enum MobileDeviceStatus
+{
+    Available = 0,
+    Unhealthy = 1,
+    Offline = 2,
+    Disabled = 3
+}
+
+/// <summary>
+/// Device slot lease lifecycle (Phase 3 Slice 3C). Structural model only:
+/// no leasing service exists in the registry checkpoint. Future terminal
+/// states are final; a slot row is never reused for a new claim.
+/// </summary>
+public enum MobileSlotStatus
+{
+    Free = 0,
+    Claimed = 1,
+    Active = 2,
+    Released = 3,
+    Expired = 4
+}
+
+/// <summary>
+/// Device session lifecycle (Phase 3 Slice 3C). Persistence model only;
+/// no session lifecycle service exists in the registry checkpoint.
+/// </summary>
+public enum MobileSessionStatus
+{
+    Creating = 0,
+    Active = 1,
+    Orphaned = 2,
+    Closed = 3
+}
+
+/// <summary>Application install policy for a mobile app under test.</summary>
+public enum MobileInstallPolicy
+{
+    Preinstalled = 0,
+    Install = 1,
+    Reinstall = 2
+}
+
+/// <summary>
 /// Self-healing attempt lifecycle (Phase 2 Slice 11). One row per
 /// (execution test, step) captures the final outcome; the granular
 /// candidate lifecycle lives in execution logs, not rows.

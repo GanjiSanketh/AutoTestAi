@@ -523,3 +523,23 @@ existing Settings patterns with write-only secrets. Metrics
 Retention defaults to 90 days; the purge job is deferred and documented.
 Out of scope: scheduled execution, outbound CI status sync, Slack/Teams,
 Azure DevOps ticketing, mobile/Appium, visual regression.
+
+## 16. Mobile Device Registry (Phase 3 Slice 3C-1/3C-2)
+
+Project-scoped administrative registry with no runtime behavior: `mobile_device_pools`
+(selection groups, unique name per project, android/ios, Active/Disabled),
+`mobile_devices` (structured identity/capabilities — platformVersion,
+manufacturer, model, UDID, UiAutomator2/XCUITest automation name; never
+arbitrary capabilities JSON), `mobile_device_slots` (one default Free slot
+per registered device; claim fields structural only), `mobile_device_sessions`
+(persistence model only; never created by registry CRUD), and `mobile_apps`
+(package/bundle identity, install policy, storage-key reference only — never
+binaries, never secrets). All relationships use Restrict delete behavior;
+registry retires via disable, never destructive deletion. `executions` gains
+nullable `mobile_device_pool_id/mobile_app_id/mobile_device_session_id`
+references (unused until future slices; web/API executions unaffected).
+Management requires `settings.manage`, reads `executions.read`; audit
+`mobile.pool/device/app_created/updated/enabled/disabled/registered` carries
+safe metadata only. Slot leasing, Appium worker (`workers/appium`),
+mobile execution, CI fan-out, self-healing, video, cloud farms, and real-iOS
+support are explicitly FUTURE and must not be inferred from this foundation.

@@ -188,6 +188,8 @@ public class Slice1ApiFactory : WebApplicationFactory<Program>
             services.AddScoped<AutoTestAi.Application.Variables.ITestSuiteLookup, AutoTestAi.Infrastructure.Variables.EfTestSuiteLookup>();
             services.RemoveAll<AutoTestAi.Application.Webhooks.IWebhookDeliveryStore>();
             services.AddScoped<AutoTestAi.Application.Webhooks.IWebhookDeliveryStore, AutoTestAi.Infrastructure.Webhooks.EfWebhookDeliveryStore>();
+            services.RemoveAll<AutoTestAi.Application.Mobile.IMobileRegistryStore>();
+            services.AddScoped<AutoTestAi.Application.Mobile.IMobileRegistryStore, AutoTestAi.Infrastructure.Mobile.EfMobileRegistryStore>();
             services.RemoveAll<AutoTestAi.Application.Webhooks.ISuiteMemberLookup>();
             services.AddScoped<AutoTestAi.Application.Webhooks.ISuiteMemberLookup, AutoTestAi.Infrastructure.Webhooks.EfSuiteMemberLookup>();
             services.RemoveAll<AutoTestAi.Application.Secrets.ISecretResolver>();

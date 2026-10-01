@@ -101,6 +101,24 @@ users/projects → audit_events
 ### webhook_deliveries (Slice 3B)
 `id UUID PK`, `integration_id FK`, `project_id FK`, `provider` (≤50), `delivery_id` (≤200, provider-scoped: GitHub delivery UUID, GitLab event UUID, Azure notification id, Jenkins caller id or derived hash), `event_type` (≤200), `received_at`, `payload_hash` (SHA-256 hex of the raw body; the raw body itself is never persisted), `verification_status` (Pending/Verified/Failed), `processing_status` (Received/Accepted/Triggered/Failed/Rejected/Duplicate/Ignored), `normalized_metadata_json NULL` (redacted branch/commit/repo/actor/filter outcome only), `execution_id NULL` (first fanned-out execution), `triggered_count`, `failure_reason NULL` (≤500, safe codes only), `processed_at NULL`, `claim_token NULL` + `claim_expires_at NULL` (crash-recovery lease), `row_version` (optimistic concurrency), timestamps. Unique `IX_webhook_deliveries_Integration_Delivery (integration_id,delivery_id)` (authoritative duplicate boundary); indexes on `project_id`, `integration_id`, `processing_status`, `received_at`, `execution_id`. No secrets, signatures, headers, or payloads. Retention default 90 days (purge job deferred — documented).
 
+### mobile_device_pools (Slice 3C-1/3C-2)
+`id UUID PK`, `project_id FK`, `name` (≤200), `platform` (Android/Ios string), `status` (Active/Disabled string), `row_version`, timestamps. Unique `IX_mobile_pools_Project_Name (project_id,name)`; indexes on `project_id`, `status`. Selection group only — no lease state.
+
+### mobile_devices (Slice 3C-1/3C-2)
+`id UUID PK`, `project_id FK`, `pool_id FK → mobile_device_pools (Restrict)`, `platform` (string), `platform_version NULL` (≤100), `manufacturer NULL` (≤200), `model NULL` (≤200), `udid NULL` (≤200), `automation_name` (≤100, UiAutomator2/XCUITest), `status` (Available/Unhealthy/Offline/Disabled string), `last_seen_at NULL` (worker-reported in future slices), `row_version`, timestamps. Unique `IX_mobile_devices_Project_Udid (project_id,udid) WHERE udid IS NOT NULL`; indexes on `project_id`, `pool_id`, `(project_id,status)`, `platform`. Structured capabilities only — no arbitrary JSON, no secrets.
+
+### mobile_device_slots (Slice 3C-1/3C-2)
+`id UUID PK`, `project_id FK`, `pool_id FK`, `device_id FK → mobile_devices (Restrict)`, `slot_number` (default registration uses 1), `status` (Free/Claimed/Active/Released/Expired string), `claim_token NULL`, `claim_expires_at NULL`, `assignment_id NULL`, `row_version`, timestamps. Unique `IX_mobile_slots_Device_SlotNumber (device_id,slot_number)`; indexes on `pool_id`, `device_id`, `status`, `claim_expires_at` (future reaper lookup). Lease fields are structural preparation only — no claiming service exists in this checkpoint.
+
+### mobile_device_sessions (Slice 3C-1/3C-2)
+`id UUID PK`, `project_id FK`, `device_id FK`, `device_slot_id FK → mobile_device_slots (Restrict)`, `execution_id NULL`, `assignment_id NULL`, `appium_session_id NULL` (≤200), `status` (Creating/Active/Orphaned/Closed string), `started_at/closed_at/last_heartbeat_at NULL`, `row_version`, timestamps. Indexes on `device_slot_id`, `execution_id`, `assignment_id`, `status`. Persistence model only — registry CRUD never creates sessions.
+
+### mobile_apps (Slice 3C-1/3C-2)
+`id UUID PK`, `project_id FK`, `platform` (string), `name` (≤200), `package_id NULL` (≤300, Android-required), `bundle_id NULL` (≤300, iOS-required), `version NULL` (≤100), `storage_key NULL` (≤500, object-storage reference only), `install_policy` (Preinstalled/Install/Reinstall string), `launch_activity NULL` (≤500, Android-only), `deep_link NULL` (≤2000, executable schemes rejected), `row_version`, timestamps. Unique `IX_mobile_apps_Project_Package (project_id,platform,package_id) WHERE package_id IS NOT NULL` and `IX_mobile_apps_Project_Bundle (project_id,platform,bundle_id) WHERE bundle_id IS NOT NULL`; indexes on `project_id`, `(project_id,platform)`. Metadata only — never binaries, never secrets.
+
+### executions mobile references (Slice 3C-1/3C-2)
+`executions` gains nullable `mobile_device_pool_id`, `mobile_app_id`, `mobile_device_session_id` (no FK constraints, no indexes — unset until future mobile execution slices; web/API executions unaffected).
+
 ### grid_workers (Slice 9)
 `id UUID PK`, `worker_key VARCHAR(100) UNIQUE`, `display_name`, `worker_type`, `framework`, `browsers text[]`, `version`, `status`, `capacity`, `active_assignment_count`, `last_heartbeat_at`, `credential_hash`, `credential_salt`, `base_url`, `row_version` (concurrency token), `created_at`, `updated_at`. Index on `status`, `last_heartbeat_at`; unique on `worker_key`.
 

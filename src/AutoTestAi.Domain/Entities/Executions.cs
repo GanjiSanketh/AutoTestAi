@@ -20,6 +20,25 @@ public sealed class Execution : EntityBase
     /// </summary>
     public string? IdempotencyKey { get; set; }
 
+    /// <summary>
+    /// Future mobile execution target: device pool selected for this
+    /// execution (Phase 3 Slice 3C). Null for web/API executions. Set by
+    /// future mobile execution slices only; registry CRUD never writes it.
+    /// </summary>
+    public Guid? MobileDevicePoolId { get; set; }
+
+    /// <summary>
+    /// Future mobile execution target: application under test
+    /// (Phase 3 Slice 3C). Null for web/API executions.
+    /// </summary>
+    public Guid? MobileAppId { get; set; }
+
+    /// <summary>
+    /// Future mobile execution target: device session that ran this
+    /// execution (Phase 3 Slice 3C). Null for web/API executions.
+    /// </summary>
+    public Guid? MobileDeviceSessionId { get; set; }
+
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public Guid? CreatedBy { get; set; }

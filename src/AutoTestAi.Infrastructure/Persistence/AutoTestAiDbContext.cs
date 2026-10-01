@@ -45,6 +45,11 @@ public sealed class AutoTestAiDbContext : DbContext
     public DbSet<EnvironmentSecret> EnvironmentSecrets => Set<EnvironmentSecret>();
     public DbSet<ExecutionVariables> ExecutionVariables => Set<ExecutionVariables>();
     public DbSet<WebhookDelivery> WebhookDeliveries => Set<WebhookDelivery>();
+    public DbSet<MobileDevicePool> MobileDevicePools => Set<MobileDevicePool>();
+    public DbSet<MobileDevice> MobileDevices => Set<MobileDevice>();
+    public DbSet<MobileDeviceSlot> MobileDeviceSlots => Set<MobileDeviceSlot>();
+    public DbSet<MobileDeviceSession> MobileDeviceSessions => Set<MobileDeviceSession>();
+    public DbSet<MobileApp> MobileApps => Set<MobileApp>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -299,6 +304,105 @@ public sealed class AutoTestAiDbContext : DbContext
         modelBuilder.Entity<WebhookDelivery>().Property(d => d.VerificationStatus).HasConversion<string>();
         modelBuilder.Entity<WebhookDelivery>().Property(d => d.ProcessingStatus).HasConversion<string>();
         modelBuilder.Entity<WebhookDelivery>().Property(d => d.RowVersion).IsConcurrencyToken();
+
+        // --- mobile registry (Phase 3 Slice 3C-1/3C-2, additive) ---
+        // No cascade deletes: pools/devices/apps will be referenced by
+        // executions and sessions, so relationships are Restrict. Registry
+        // CRUD uses administrative disable instead of destructive deletion.
+        modelBuilder.Entity<MobileDevicePool>().ToTable("mobile_device_pools");
+        modelBuilder.Entity<MobileDevicePool>().HasIndex(p => p.ProjectId);
+        modelBuilder.Entity<MobileDevicePool>().HasIndex(p => p.Status);
+        modelBuilder.Entity<MobileDevicePool>()
+            .HasIndex(p => new { p.ProjectId, p.Name })
+            .IsUnique()
+            .HasDatabaseName("IX_mobile_pools_Project_Name");
+        modelBuilder.Entity<MobileDevicePool>().Property(p => p.Name).HasMaxLength(200);
+        modelBuilder.Entity<MobileDevicePool>().Property(p => p.Platform).HasConversion<string>();
+        modelBuilder.Entity<MobileDevicePool>().Property(p => p.Status).HasConversion<string>();
+        modelBuilder.Entity<MobileDevicePool>().Property(p => p.RowVersion).IsRowVersion();
+
+        modelBuilder.Entity<MobileDevice>().ToTable("mobile_devices");
+        modelBuilder.Entity<MobileDevice>().HasIndex(d => d.ProjectId);
+        modelBuilder.Entity<MobileDevice>().HasIndex(d => d.PoolId);
+        modelBuilder.Entity<MobileDevice>().HasIndex(d => new { d.ProjectId, d.Status });
+        modelBuilder.Entity<MobileDevice>().HasIndex(d => d.Platform);
+        // One UDID per project when supplied (nulls never collide).
+        modelBuilder.Entity<MobileDevice>()
+            .HasIndex(d => new { d.ProjectId, d.Udid })
+            .IsUnique()
+            .HasDatabaseName("IX_mobile_devices_Project_Udid")
+            .HasFilter("\"Udid\" IS NOT NULL");
+        modelBuilder.Entity<MobileDevice>()
+            .HasOne<MobileDevicePool>()
+            .WithMany()
+            .HasForeignKey(d => d.PoolId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<MobileDevice>().Property(d => d.Platform).HasConversion<string>();
+        modelBuilder.Entity<MobileDevice>().Property(d => d.Status).HasConversion<string>();
+        modelBuilder.Entity<MobileDevice>().Property(d => d.PlatformVersion).HasMaxLength(100);
+        modelBuilder.Entity<MobileDevice>().Property(d => d.Manufacturer).HasMaxLength(200);
+        modelBuilder.Entity<MobileDevice>().Property(d => d.Model).HasMaxLength(200);
+        modelBuilder.Entity<MobileDevice>().Property(d => d.Udid).HasMaxLength(200);
+        modelBuilder.Entity<MobileDevice>().Property(d => d.AutomationName).HasMaxLength(100);
+        modelBuilder.Entity<MobileDevice>().Property(d => d.RowVersion).IsRowVersion();
+
+        modelBuilder.Entity<MobileDeviceSlot>().ToTable("mobile_device_slots");
+        modelBuilder.Entity<MobileDeviceSlot>().HasIndex(s => s.PoolId);
+        modelBuilder.Entity<MobileDeviceSlot>().HasIndex(s => s.DeviceId);
+        modelBuilder.Entity<MobileDeviceSlot>().HasIndex(s => s.Status);
+        // Deterministic slot identity: no duplicate slot numbers per device.
+        modelBuilder.Entity<MobileDeviceSlot>()
+            .HasIndex(s => new { s.DeviceId, s.SlotNumber })
+            .IsUnique()
+            .HasDatabaseName("IX_mobile_slots_Device_SlotNumber");
+        // Future lease-recovery lookup: stale claimed slots by expiry.
+        modelBuilder.Entity<MobileDeviceSlot>().HasIndex(s => s.ClaimExpiresAt);
+        modelBuilder.Entity<MobileDeviceSlot>()
+            .HasOne<MobileDevice>()
+            .WithMany()
+            .HasForeignKey(s => s.DeviceId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<MobileDeviceSlot>().Property(s => s.Status).HasConversion<string>();
+        modelBuilder.Entity<MobileDeviceSlot>().Property(s => s.RowVersion).IsRowVersion();
+
+        modelBuilder.Entity<MobileDeviceSession>().ToTable("mobile_device_sessions");
+        modelBuilder.Entity<MobileDeviceSession>().HasIndex(s => s.DeviceSlotId);
+        modelBuilder.Entity<MobileDeviceSession>().HasIndex(s => s.ExecutionId);
+        modelBuilder.Entity<MobileDeviceSession>().HasIndex(s => s.AssignmentId);
+        modelBuilder.Entity<MobileDeviceSession>().HasIndex(s => s.Status);
+        modelBuilder.Entity<MobileDeviceSession>()
+            .HasOne<MobileDeviceSlot>()
+            .WithMany()
+            .HasForeignKey(s => s.DeviceSlotId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<MobileDeviceSession>().Property(s => s.AppiumSessionId).HasMaxLength(200);
+        modelBuilder.Entity<MobileDeviceSession>().Property(s => s.Status).HasConversion<string>();
+        modelBuilder.Entity<MobileDeviceSession>().Property(s => s.RowVersion).IsRowVersion();
+
+        modelBuilder.Entity<MobileApp>().ToTable("mobile_apps");
+        modelBuilder.Entity<MobileApp>().HasIndex(a => a.ProjectId);
+        modelBuilder.Entity<MobileApp>().HasIndex(a => new { a.ProjectId, a.Platform });
+        // One Android package / iOS bundle per project when supplied.
+        modelBuilder.Entity<MobileApp>()
+            .HasIndex(a => new { a.ProjectId, a.Platform, a.PackageId })
+            .IsUnique()
+            .HasDatabaseName("IX_mobile_apps_Project_Package")
+            .HasFilter("\"PackageId\" IS NOT NULL");
+        modelBuilder.Entity<MobileApp>()
+            .HasIndex(a => new { a.ProjectId, a.Platform, a.BundleId })
+            .IsUnique()
+            .HasDatabaseName("IX_mobile_apps_Project_Bundle")
+            .HasFilter("\"BundleId\" IS NOT NULL");
+        modelBuilder.Entity<MobileApp>().Property(a => a.Platform).HasConversion<string>();
+        modelBuilder.Entity<MobileApp>().Property(a => a.InstallPolicy).HasConversion<string>();
+        modelBuilder.Entity<MobileApp>().Property(a => a.Name).HasMaxLength(200);
+        modelBuilder.Entity<MobileApp>().Property(a => a.PackageId).HasMaxLength(300);
+        modelBuilder.Entity<MobileApp>().Property(a => a.BundleId).HasMaxLength(300);
+        modelBuilder.Entity<MobileApp>().Property(a => a.Version).HasMaxLength(100);
+        modelBuilder.Entity<MobileApp>().Property(a => a.StorageKey).HasMaxLength(500);
+        modelBuilder.Entity<MobileApp>().Property(a => a.LaunchActivity).HasMaxLength(500);
+        modelBuilder.Entity<MobileApp>().Property(a => a.DeepLink).HasMaxLength(2000);
+        modelBuilder.Entity<MobileApp>().Property(a => a.RowVersion).IsRowVersion();
 
         // --- audit ---
         modelBuilder.Entity<AuditEvent>().ToTable("audit_events");

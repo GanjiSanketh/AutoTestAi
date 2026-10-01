@@ -840,3 +840,35 @@ Audit webhook.accepted/duplicate/rejected/authentication_failed/execution_reques
 At-least-once provider delivery with idempotent processing; exactly-once is NOT claimed.
 Delivery retention default 90 days (purge job deferred). Appium/mobile, visual regression,
 scheduled execution, outbound CI status sync, and Slack/Teams are NOT part of this contract.
+## Slice 3C-1/3C-2 - Mobile Registry
+
+Project-scoped administrative registry (settings.manage writes, executions.read reads).
+No leasing, sessions, worker, or execution behavior. Secrets are never part of this surface.
+
+- GET /api/v1/projects/{projectId}/mobile/pools - list pools with device counts.
+- POST /api/v1/projects/{projectId}/mobile/pools - body {name, platform: android|ios}. Duplicate name returns 409.
+- GET /api/v1/projects/{projectId}/mobile/pools/{poolId} - one pool (cross-project returns 404).
+- PUT .../mobile/pools/{poolId} - body {name, enabled, rowVersion? base64}; stale version returns 409. Platform is immutable.
+- POST .../mobile/pools/{poolId}/enable and .../disable - administrative state only; devices and history survive.
+- GET /api/v1/projects/{projectId}/mobile/devices[?poolId=] - structured capabilities, slot counts, no lease tokens.
+- POST /api/v1/projects/{projectId}/mobile/devices - body {poolId, platform, platformVersion?, manufacturer?, model?, udid?, automationName}.
+  Platform must match the pool; automation must match the platform (UiAutomator2 for android, XCUITest for ios);
+  duplicate UDID per project returns 409. Registration atomically creates exactly one default slot (slot 1, Free).
+- GET /api/v1/projects/{projectId}/mobile/devices/{deviceId} - one device (cross-project returns 404).
+- PUT .../mobile/devices/{deviceId} - capability edits + enable toggle (Disabled/Available only; worker-derived
+  Unhealthy/Offline states are never set here); stale version returns 409.
+- POST .../mobile/devices/{deviceId}/enable and .../disable - non-destructive.
+- GET /api/v1/projects/{projectId}/mobile/apps - list app references.
+- POST /api/v1/projects/{projectId}/mobile/apps - body {platform, name, packageId?, bundleId?, version?,
+  storageKey?, installPolicy: Preinstalled|Install|Reinstall, launchActivity?, deepLink?}.
+  Android requires packageId (bundleId must be null); ios requires bundleId (packageId must be null);
+  launchActivity is Android-only; storageKey is a plain object-storage key (no URLs/credentials/traversal);
+  deepLink rejects executable schemes. No binary upload in this checkpoint.
+- GET /api/v1/projects/{projectId}/mobile/apps/{appId} - one app (cross-project returns 404).
+- PUT .../mobile/apps/{appId} - metadata edits; platform immutable; stale version returns 409.
+
+No DELETE endpoints exist: referenced infrastructure retires via disable. No slot-claim, session,
+heartbeat, worker-registration, or execution endpoints exist in this checkpoint. Audit events
+mobile.pool/device/app_created/updated/enabled/disabled/registered carry safe identifiers only.
+Appium execution, slot leasing, CI mobile fan-out, self-healing, video, cloud device farms, and
+real-iOS support are NOT part of this contract.
