@@ -23,4 +23,12 @@ public sealed class MobileOptions
 
     public TimeSpan LeaseDuration => TimeSpan.FromSeconds(Math.Clamp(LeaseDurationSeconds, 60, 3600));
     public TimeSpan ClaimGrace => TimeSpan.FromSeconds(Math.Clamp(ClaimGraceSeconds, 60, 3600));
+
+    /// <summary>
+    /// Slice 3C-4A: Appium newCommandTimeout applied to every server-built
+    /// capability set. Worker-local default; not user-configurable per execution.
+    /// </summary>
+    public int NewCommandTimeoutSeconds { get; set; } = 120;
+
+    public TimeSpan NewCommandTimeout => TimeSpan.FromSeconds(Math.Clamp(NewCommandTimeoutSeconds, 10, 600));
 }

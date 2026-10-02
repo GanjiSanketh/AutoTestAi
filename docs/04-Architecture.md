@@ -571,3 +571,32 @@ released/expired/recovered` carries identifiers only. Worker registration
 accepts `appium`/`appium` (browsers must be empty); Playwright rules
 unchanged. Appium session creation, step execution, and dispatch remain
 FUTURE: this slice schedules and leases only.
+
+## 18. Mobile Execution Foundations (Phase 3 Slice 3C-4A)
+
+Execution start accepts additive nullable `mobileDevicePoolId`/`mobileAppId`
+inputs (API body, command, and `Execution.MobileDevicePoolId/MobileAppId`
+populated at start; `MobileDeviceSessionId` stays null until a later slice
+creates sessions). Appium-framework test cases skip browser validation
+entirely (web/API keep the exact chromium default and allowlist); mobile
+targets require a same-project active pool plus a same-project app whose
+platform matches the pool, and mobile refs on non-appium executions are
+rejected. Authorization, approval gate, idempotency, and environment
+resolution are unchanged. The worker contract (`IMobileWorkerClient` +
+`MobileAssignmentDto`) mirrors the Playwright envelope mechanics without
+browser concepts and never carries `ClaimToken`; server-side
+`MobileCapabilityBuilder` emits a fixed capability schema (platformName,
+automationName, deviceName, udid?, appPackage/appActivity/bundleId/app?,
+noReset/fullReset from `InstallPolicy`, `newCommandTimeout`) from validated
+structured data only — dictionary/JSON capability input is impossible by
+construction. The `workers/appium` scaffold (config/server/grid-loop/
+redaction/locators/steps) validates envelopes and returns a controlled
+deferred `error/automation/NotImplemented` result; no driver exists, and it
+never reports success unperformed. The Appium endpoint is worker-local
+configuration (`APPIUM_SERVER_URL`, default `http://localhost:4723`),
+never user input. Closed MVP action set
+(launchApp/tap/inputText/clearText/assertVisible/assertText/swipe/back/
+hideKeyboard/wait/screenshot/terminateApp) and `accessibilityId=`/
+`resourceId=` locators are validated, never executed, in this checkpoint.
+Actual Appium session creation, step execution, screenshots, page source,
+logs, dispatch, and iOS runtime remain FUTURE (ADR-008).

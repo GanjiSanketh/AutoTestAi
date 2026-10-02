@@ -17,7 +17,9 @@ public sealed record StartExecutionCommand(
     Guid? SuiteId = null,
     IReadOnlyDictionary<string, string>? VariableOverrides = null,
     IReadOnlyDictionary<string, string>? SecretRefOverrides = null,
-    TriggerType? Trigger = null);
+    TriggerType? Trigger = null,
+    Guid? MobileDevicePoolId = null,
+    Guid? MobileAppId = null);
 
 public sealed record ExecutionFilters(
     string? Status,

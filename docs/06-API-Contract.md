@@ -326,9 +326,18 @@ Start request (exact version only — no scripts, paths, or credentials accepted
   "testCaseVersionId": "uuid",
   "environmentId": "uuid (optional, must belong to the project)",
   "browser": "chromium",
-  "idempotencyKey": "optional client key (repeat returns the original, 200)"
+  "idempotencyKey": "optional client key (repeat returns the original, 200)",
+  "mobileDevicePoolId": "uuid (appium executions only, must belong to the project)",
+  "mobileAppId": "uuid (appium executions only, must belong to the project)"
 }
 ```
+
+Slice 3C-4A mobile start: test cases with framework `appium` skip browser
+validation (no browser is stored) and require `mobileDevicePoolId` +
+`mobileAppId` identifying a same-project active pool and a same-project app
+whose platform matches the pool; otherwise `400`. Mobile refs on non-appium
+executions are rejected (`400`). `Execution.MobileDeviceSessionId` remains
+null until a later slice creates sessions.
 
 Start response (`→ 202`, `200` when an idempotency key repeats):
 

@@ -9,7 +9,9 @@ public sealed record StartExecutionBody(
     string? IdempotencyKey,
     Guid? SuiteId,
     Dictionary<string, string>? VariableOverrides,
-    Dictionary<string, string>? SecretRefOverrides);
+    Dictionary<string, string>? SecretRefOverrides,
+    Guid? MobileDevicePoolId,
+    Guid? MobileAppId);
 
 /// <summary>
 /// Execution control-plane surface (docs/06 §8). All routes require
@@ -36,7 +38,10 @@ public static class ExecutionEndpoints
                     body?.IdempotencyKey,
                     body?.SuiteId,
                     body?.VariableOverrides,
-                    body?.SecretRefOverrides), ct);
+                    body?.SecretRefOverrides,
+                    null,
+                    body?.MobileDevicePoolId,
+                    body?.MobileAppId), ct);
                 return result.Duplicated
                     ? Results.Ok(result)
                     : Results.Accepted($"/api/v1/projects/{projectId}/executions/{result.ExecutionId}", result);

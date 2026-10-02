@@ -15,6 +15,7 @@ import {
   type TestCaseVersion,
 } from '../../lib/api/endpoints/testcases';
 import { executionEndpoints } from '../../lib/api/endpoints/executions';
+import { mobileEndpoints } from '../../lib/api/endpoints/mobile';
 import { useProfile } from '../../lib/auth/useProfile';
 import { Permissions, hasPermission } from '../../lib/auth/permissions';
 import { SourceEditor, editorLanguageFor } from './SourceEditor';
@@ -113,6 +114,22 @@ export function TestCaseDetailsPage() {
   });
 
   const [runError, setRunError] = useState<ApiError | null>(null);
+  const [mobilePoolId, setMobilePoolId] = useState('');
+  const [mobileAppId, setMobileAppId] = useState('');
+  const [mobileTargetError, setMobileTargetError] = useState<string | null>(null);
+  const isMobileRun = (testCase.data?.framework ?? '').trim().toLowerCase() === 'appium';
+  const mobilePools = useQuery({
+    queryKey: ['mobile', 'pools', projectId],
+    queryFn: () => mobileEndpoints.listPools(projectId),
+    enabled: isMobileRun,
+    retry: false,
+  });
+  const mobileApps = useQuery({
+    queryKey: ['mobile', 'apps', projectId],
+    queryFn: () => mobileEndpoints.listApps(projectId),
+    enabled: isMobileRun,
+    retry: false,
+  });
   const run = useMutation({
     mutationFn: (versionId: string) =>
       executionEndpoints.start(projectId, {
@@ -121,6 +138,12 @@ export function TestCaseDetailsPage() {
           typeof crypto !== 'undefined' && 'randomUUID' in crypto
             ? crypto.randomUUID()
             : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        ...(isMobileRun
+          ? {
+              mobileDevicePoolId: mobilePoolId || undefined,
+              mobileAppId: mobileAppId || undefined,
+            }
+          : {}),
       }),
     onSuccess: (result) => {
       setRunError(null);
@@ -307,15 +330,65 @@ export function TestCaseDetailsPage() {
                 </p>
               )}
               {canExecute && selectedVersion && selectedVersion.reviewStatus === 'Approved' && (
-                <Button
-                  variant="success"
-                  size="sm"
-                  disabled={run.isPending}
-                  onClick={() => run.mutate(selectedVersion.id)}
-                >
-                  <Play className="h-4 w-4" aria-hidden />
-                  {run.isPending ? 'Starting…' : `Run v${selectedVersion.versionNumber}`}
-                </Button>
+                <>
+                  {isMobileRun && (
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-slate-700" htmlFor="run-mobile-pool">
+                        Device pool
+                      </label>
+                      <select
+                        id="run-mobile-pool"
+                        className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                        value={mobilePoolId}
+                        onChange={(e) => setMobilePoolId(e.target.value)}
+                      >
+                        <option value="">Select a device pool</option>
+                        {(mobilePools.data ?? []).map((pool) => (
+                          <option key={pool.id} value={pool.id}>
+                            {pool.name} ({pool.platform})
+                          </option>
+                        ))}
+                      </select>
+                      <label className="block text-sm font-medium text-slate-700" htmlFor="run-mobile-app">
+                        Application
+                      </label>
+                      <select
+                        id="run-mobile-app"
+                        className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                        value={mobileAppId}
+                        onChange={(e) => setMobileAppId(e.target.value)}
+                      >
+                        <option value="">Select an application</option>
+                        {(mobileApps.data ?? []).map((app) => (
+                          <option key={app.id} value={app.id}>
+                            {app.name} ({app.platform})
+                          </option>
+                        ))}
+                      </select>
+                      {mobileTargetError && (
+                        <p role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                          {mobileTargetError}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  <Button
+                    variant="success"
+                    size="sm"
+                    disabled={run.isPending}
+                    onClick={() => {
+                      if (isMobileRun && (!mobilePoolId || !mobileAppId)) {
+                        setMobileTargetError('Select a device pool and an application to run this mobile test.');
+                        return;
+                      }
+                      setMobileTargetError(null);
+                      run.mutate(selectedVersion.id);
+                    }}
+                  >
+                    <Play className="h-4 w-4" aria-hidden />
+                    {run.isPending ? 'Starting…' : `Run v${selectedVersion.versionNumber}`}
+                  </Button>
+                </>
               )}
               {canExecute && selectedVersion && selectedVersion.reviewStatus !== 'Approved' && (
                 <p className="text-xs text-slate-400" title="Only approved versions can be executed">

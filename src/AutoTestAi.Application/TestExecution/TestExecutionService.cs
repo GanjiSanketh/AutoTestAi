@@ -4,6 +4,7 @@ using AutoTestAi.Application.Authorization;
 using AutoTestAi.Application.Common;
 using AutoTestAi.Application.ExecutionGrid;
 using AutoTestAi.Application.Identity;
+using AutoTestAi.Application.Mobile;
 using AutoTestAi.Application.Projects;
 using AutoTestAi.Application.Secrets;
 using AutoTestAi.Application.Storage;
@@ -30,6 +31,9 @@ public sealed class TestExecutionService : ITestExecutionService
     private static readonly IReadOnlySet<string> SupportedBrowsers =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "chromium", "firefox", "webkit" };
 
+    /// <summary>Test-case framework value selecting the mobile execution path (Slice 3C).</summary>
+    internal const string MobileFramework = "appium";
+
     private readonly IExecutionStore _store;
     private readonly ITestCaseStore _cases;
     private readonly IProjectStore _projects;
@@ -46,6 +50,7 @@ public sealed class TestExecutionService : ITestExecutionService
     private readonly IExecutionVariablesStore? _variables;
     private readonly ITestSuiteLookup? _suites;
     private readonly ISecretResolver? _secrets;
+    private readonly IMobileRegistryStore? _mobileRegistry;
 
     public TestExecutionService(
         IExecutionStore store,
@@ -63,7 +68,8 @@ public sealed class TestExecutionService : ITestExecutionService
         IGridAssignmentStore? gridAssignments = null,
         IExecutionVariablesStore? variables = null,
         ITestSuiteLookup? suites = null,
-        ISecretResolver? secrets = null)
+        ISecretResolver? secrets = null,
+        IMobileRegistryStore? mobileRegistry = null)
     {
         _store = store;
         _cases = cases;
@@ -81,6 +87,7 @@ public sealed class TestExecutionService : ITestExecutionService
         _variables = variables;
         _suites = suites;
         _secrets = secrets;
+        _mobileRegistry = mobileRegistry;
     }
 
     public Task<StartExecutionResultDto> StartAsync(
@@ -131,6 +138,26 @@ public sealed class TestExecutionService : ITestExecutionService
         if (version.ReviewStatus != ReviewStatus.Approved)
             throw new ConflictException(
                 $"Test case version {version.VersionNumber} has review status '{version.ReviewStatus}' and cannot be executed. Only Approved versions may execute.");
+
+        // Slice 3C-4A: mobile execution target. Appium test cases carry no
+        // browser; they require a project-owned pool + app instead. Web/API
+        // behavior (including the chromium default) is preserved exactly.
+        var framework = string.IsNullOrWhiteSpace(testCase.Framework) ? "playwright" : testCase.Framework.Trim();
+        var isMobile = string.Equals(framework, MobileFramework, StringComparison.OrdinalIgnoreCase);
+        Guid? mobilePoolId = null;
+        Guid? mobileAppId = null;
+        if (isMobile)
+        {
+            normalized = normalized with { Browser = null };
+            (mobilePoolId, mobileAppId) = await ResolveMobileTargetAsync(normalized, cancellationToken);
+        }
+        else
+        {
+            if (normalized.MobileDevicePoolId.HasValue || normalized.MobileAppId.HasValue)
+                throw new ValidationException("Mobile execution targets require an appium test case.",
+                    new[] { new FieldError("mobileDevicePoolId", "Mobile targets are only valid for appium executions.") });
+            normalized = normalized with { Browser = normalized.Browser ?? "chromium" };
+        }
 
         // Slice 3A: environment-aware execution. Legacy Phase 2 executions may
         // carry a null EnvironmentId (environment-less) and keep working.
@@ -224,6 +251,8 @@ public sealed class TestExecutionService : ITestExecutionService
             TriggerType = normalized.Trigger ?? TriggerType.Manual,
             SuiteId = resolvedSuiteId,
             EnvironmentId = resolvedEnvironmentId,
+            MobileDevicePoolId = mobilePoolId,
+            MobileAppId = mobileAppId,
             Status = ExecutionStatus.Queued,
             IdempotencyKey = normalized.IdempotencyKey,
             CreatedBy = await ResolveAppUserIdAsync(cancellationToken),
@@ -456,6 +485,43 @@ public sealed class TestExecutionService : ITestExecutionService
             ? null
             : await _users.FindAppUserIdAsync(_currentUser.ExternalIdentityId!, cancellationToken);
 
+    /// <summary>
+    /// Slice 3C-4A: validates the mobile execution target for appium test
+    /// cases. Pool and app must belong to the project; the pool must be
+    /// active; app platform must match pool platform. Never accepts slot,
+    /// worker, assignment, token, URL, or capability inputs — those remain
+    /// server/runtime concerns.
+    /// </summary>
+    private async Task<(Guid? PoolId, Guid? AppId)> ResolveMobileTargetAsync(
+        StartExecutionCommand normalized, CancellationToken cancellationToken)
+    {
+        if (_mobileRegistry is null)
+            throw new ValidationException("Mobile execution is not supported by this configuration.",
+                new[] { new FieldError("mobileDevicePoolId", "Mobile registry is unavailable.") });
+        var errors = new List<FieldError>();
+        if (!normalized.MobileDevicePoolId.HasValue || normalized.MobileDevicePoolId.Value == Guid.Empty)
+            errors.Add(new FieldError("mobileDevicePoolId", "A device pool is required for appium executions."));
+        if (!normalized.MobileAppId.HasValue || normalized.MobileAppId.Value == Guid.Empty)
+            errors.Add(new FieldError("mobileAppId", "A mobile app is required for appium executions."));
+        ValidationException.ThrowIfInvalid(errors);
+
+        var pool = await _mobileRegistry.GetPoolByIdAsync(normalized.MobileDevicePoolId!.Value, cancellationToken);
+        if (pool is null || pool.ProjectId != normalized.ProjectId)
+            throw new ValidationException("The specified device pool does not belong to this project.",
+                new[] { new FieldError("mobileDevicePoolId", "Device pool must belong to the project.") });
+        if (pool.Status != MobilePoolStatus.Active)
+            throw new ValidationException("The specified device pool is disabled.",
+                new[] { new FieldError("mobileDevicePoolId", "Device pool must be active.") });
+        var app = await _mobileRegistry.GetAppByIdAsync(normalized.MobileAppId!.Value, cancellationToken);
+        if (app is null || app.ProjectId != normalized.ProjectId)
+            throw new ValidationException("The specified mobile app does not belong to this project.",
+                new[] { new FieldError("mobileAppId", "Mobile app must belong to the project.") });
+        if (app.Platform != pool.Platform)
+            throw new ValidationException("Mobile app platform must match the device pool platform.",
+                new[] { new FieldError("mobileAppId", "App platform must match the pool platform.") });
+        return (pool.Id, app.Id);
+    }
+
     private static StartExecutionCommand NormalizeAndValidate(StartExecutionCommand command)
     {
         var errors = new List<FieldError>();
@@ -463,14 +529,16 @@ public sealed class TestExecutionService : ITestExecutionService
             errors.Add(new FieldError("projectId", "Project id is required."));
         if (command.TestCaseVersionId == Guid.Empty)
             errors.Add(new FieldError("testCaseVersionId", "Test case version id is required."));
-        var browser = (command.Browser ?? "chromium").Trim();
-        if (!SupportedBrowsers.Contains(browser))
+        var browser = string.IsNullOrWhiteSpace(command.Browser)
+            ? null
+            : command.Browser.Trim().ToLowerInvariant();
+        if (browser is not null && !SupportedBrowsers.Contains(browser))
             errors.Add(new FieldError("browser", "Browser must be 'chromium', 'firefox' or 'webkit'."));
         string? key = string.IsNullOrWhiteSpace(command.IdempotencyKey) ? null : command.IdempotencyKey.Trim();
         if (key is not null && key.Length > MaxIdempotencyKeyLength)
             errors.Add(new FieldError("idempotencyKey", $"Idempotency key must be at most {MaxIdempotencyKeyLength} characters."));
         ValidationException.ThrowIfInvalid(errors);
-        return command with { Browser = browser.ToLowerInvariant(), IdempotencyKey = key };
+        return command with { Browser = browser, IdempotencyKey = key };
     }
 
     private static string? ValidateStatusFilter(ExecutionFilters filters)

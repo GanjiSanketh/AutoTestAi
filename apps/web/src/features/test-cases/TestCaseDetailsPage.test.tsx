@@ -4,6 +4,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TestCaseDetailsPage } from './TestCaseDetailsPage';
 import { testcasesEndpoints } from '../../lib/api/endpoints/testcases';
+import { executionEndpoints } from '../../lib/api/endpoints/executions';
+import { mobileEndpoints } from '../../lib/api/endpoints/mobile';
 import { useProfile } from '../../lib/auth/useProfile';
 import { Permissions } from '../../lib/auth/permissions';
 
@@ -23,6 +25,22 @@ vi.mock('../../lib/api/endpoints/testcases', () => ({
 
 vi.mock('../../lib/auth/useProfile', () => ({
   useProfile: vi.fn(),
+}));
+
+vi.mock('../../lib/api/endpoints/executions', () => ({
+  executionKeys: {
+    all: ['executions'],
+  },
+  executionEndpoints: {
+    start: vi.fn(),
+  },
+}));
+
+vi.mock('../../lib/api/endpoints/mobile', () => ({
+  mobileEndpoints: {
+    listPools: vi.fn(),
+    listApps: vi.fn(),
+  },
 }));
 
 vi.mock('@monaco-editor/react', () => ({
@@ -159,6 +177,51 @@ describe('TestCaseDetailsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /v1/ }));
     await waitFor(() =>
       expect(screen.queryByText(/Historical version v1 \(read-only\)/)).not.toBeNull(),
+    );
+  });
+
+  it('hides mobile target selects for web test cases', async () => {
+    profileWith([Permissions.TestCasesRead, Permissions.ExecutionsExecute]);
+    renderPage();
+    await waitFor(() => expect(screen.queryByText('Version history')).not.toBeNull());
+    expect(screen.queryByLabelText('Device pool')).toBeNull();
+    expect(screen.queryByLabelText('Application')).toBeNull();
+  });
+
+  it('requires pool and app before running an appium test case', async () => {
+    profileWith([Permissions.TestCasesRead, Permissions.ExecutionsExecute]);
+    mockedGet.mockResolvedValue({ ...details, framework: 'appium', platform: 'android' } as never);
+    vi.mocked(mobileEndpoints.listPools).mockResolvedValue([
+      { id: 'pool-1', name: 'android-smoke', platform: 'Android' },
+    ] as never);
+    vi.mocked(mobileEndpoints.listApps).mockResolvedValue([
+      { id: 'app-1', name: 'Shop', platform: 'Android' },
+    ] as never);
+    renderPage();
+    await waitFor(() => expect(screen.queryByText('Version history')).not.toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: /v1/ }));
+    await waitFor(() => expect(screen.queryByLabelText('Device pool')).not.toBeNull());
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Run v1/ })).not.toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: /Run v1/ }));
+    await waitFor(() =>
+      expect(screen.queryByText(/Select a device pool and an application/)).not.toBeNull(),
+    );
+    expect(vi.mocked(executionEndpoints.start)).not.toHaveBeenCalled();
+
+    vi.mocked(executionEndpoints.start).mockResolvedValue({ executionId: 'e1' } as never);
+    fireEvent.change(screen.getByLabelText('Device pool'), { target: { value: 'pool-1' } });
+    fireEvent.change(screen.getByLabelText('Application'), { target: { value: 'app-1' } });
+    fireEvent.click(screen.getByRole('button', { name: /Run v1/ }));
+    await waitFor(() =>
+      expect(vi.mocked(executionEndpoints.start)).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({
+          testCaseVersionId: 'v1',
+          mobileDevicePoolId: 'pool-1',
+          mobileAppId: 'app-1',
+        }),
+      ),
     );
   });
 });

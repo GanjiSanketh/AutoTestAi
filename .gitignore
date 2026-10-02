@@ -13,6 +13,7 @@ node_modules/
 apps/web/dist/
 apps/web/dist-ssr/
 workers/playwright/dist/
+workers/appium/dist/
 *.log
 npm-debug.log*
 

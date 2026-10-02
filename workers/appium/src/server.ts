@@ -1,0 +1,328 @@
+/**
+ * Mobile execution HTTP plane (Slice 3C-4A scaffold).
+ *
+ *   POST   /v1/assignments        submit an assignment (202 + background run)
+ *   GET    /v1/assignments/:id    poll progress (steps, logs, terminal result)
+ *   DELETE /v1/assignments/:id    best-effort abort
+ *   GET    /health                orchestrator probe (no auth)
+ *
+ * Authentication: Bearer WORKER_API_TOKEN (timing-safe compare). The token is
+ * server-side configuration shared with the API only — never browsers.
+ *
+ * Slice 3C-4A explicitly defers Appium driver creation: accepted assignments
+ * validate the envelope, then complete immediately with a controlled
+ * error/automation deferred result. This worker never reports success for
+ * work it did not perform. No shell, no eval, no dynamic code loading.
+ */
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
+import type { MobileWorkerConfig } from './config.js';
+import { redactStepValue } from './redaction.js';
+import { validateMobileSteps } from './steps.js';
+import type {
+  MobileAssignment,
+  MobileAssignmentProgress,
+  MobileAssignmentStatus,
+  MobileLog,
+  MobileResult,
+  MobileStepResult,
+} from './types.js';
+
+interface MobileAssignmentRecord {
+  assignment: MobileAssignment;
+  assignmentToken: string;
+  status: MobileAssignmentStatus;
+  currentStepOrder: number | null;
+  stepResults: MobileStepResult[];
+  logs: MobileLog[];
+  result: MobileResult | null;
+  abort: AbortController;
+  startedAtUnixMs: number;
+}
+
+const MAX_LOGS = 2000;
+
+/** Deferred-execution marker: honest terminal result for the scaffold slice. */
+export const DEFERRED_ERROR_TYPE = 'NotImplemented';
+export const DEFERRED_ERROR_MESSAGE = 'Mobile execution is not implemented in this worker build.';
+
+export function createMobileWorkerServer(config: MobileWorkerConfig): {
+  listen: (port?: number) => Promise<void>;
+  close: () => Promise<void>;
+  /** Active (queued/running) assignment count for grid heartbeats. */
+  activeAssignments: () => number;
+  /** Grid-directed drain: stop accepting new work, finish in-flight work. */
+  setDraining: (draining: boolean) => void;
+} {
+  const assignments = new Map<string, MobileAssignmentRecord>();
+  let shuttingDown = false;
+  let draining = false;
+
+  function activeCount(): number {
+    let count = 0;
+    for (const record of assignments.values()) {
+      if (record.status === 'queued' || record.status === 'running') count += 1;
+    }
+    return count;
+  }
+
+  function log(level: MobileLog['level'], message: string): void {
+    console.log(JSON.stringify({ level, msg: message, workerId: config.workerId }));
+  }
+
+  function authorized(req: IncomingMessage): boolean {
+    if (!config.apiToken) return true;
+    const header = req.headers.authorization ?? '';
+    const presented = header.startsWith('Bearer ') ? header.slice(7) : '';
+    const expected = Buffer.from(config.apiToken);
+    const actual = Buffer.from(presented);
+    return (
+      expected.length === actual.length &&
+      expected.length > 0 &&
+      timingSafeEqual(expected, actual)
+    );
+  }
+
+  function readJson(req: IncomingMessage): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+        if (chunks.reduce((n, c) => n + c.length, 0) > 4 * 1024 * 1024) {
+          reject(new Error('Request body too large.'));
+          req.destroy();
+        }
+      });
+      req.on('end', () => {
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        } catch {
+          reject(new Error('Request body must be JSON.'));
+        }
+      });
+      req.on('error', reject);
+    });
+  }
+
+  function sendJson(res: ServerResponse, status: number, body: unknown): void {
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(body));
+  }
+
+  function progressOf(record: MobileAssignmentRecord): MobileAssignmentProgress {
+    return {
+      assignmentId: record.assignment.assignmentId,
+      status: record.status,
+      currentStepOrder: record.currentStepOrder,
+      stepResults: record.stepResults,
+      logs: record.logs,
+      result: record.result,
+    };
+  }
+
+  function pushLog(record: MobileAssignmentRecord, level: MobileLog['level'], message: string): void {
+    record.logs.push({
+      seq: record.logs.length + 1,
+      timestampUnixMs: Date.now(),
+      level,
+      message: message.slice(0, 4000),
+    });
+    if (record.logs.length > MAX_LOGS) {
+      record.logs.splice(0, record.logs.length - MAX_LOGS);
+    }
+  }
+
+  /**
+   * Deferred execution (Slice 3C-4A): no driver exists yet, so the validated
+   * assignment completes immediately with an explicit not-implemented
+   * outcome. The execution slice replaces this body with real Appium runs.
+   */
+  async function runDeferred(record: MobileAssignmentRecord): Promise<void> {
+    const { assignment } = record;
+    const startedAt = Date.now();
+    // Yield so the 202 acceptance is sent while the record is still queued,
+    // preserving the submit-then-poll contract for control-plane clients.
+    await Promise.resolve();
+    const timeout = setTimeout(
+      () => record.abort.abort(new Error('Execution timeout.')),
+      Math.min(assignment.timeouts.executionMs, config.executionTimeoutMs),
+    );
+    record.status = 'running';
+    pushLog(record, 'info', `worker ${config.workerId} accepted assignment ${assignment.assignmentId} (deferred: no driver)`);
+    try {
+      if (record.abort.signal.aborted) throw new Error('Cancelled via API.');
+      record.status = 'error';
+      record.result = {
+        status: 'error',
+        classification: 'automation',
+        errorType: DEFERRED_ERROR_TYPE,
+        errorMessage: DEFERRED_ERROR_MESSAGE,
+        durationMs: Date.now() - startedAt,
+        stepResults: [],
+        logs: record.logs,
+        screenshots: [],
+        appiumSessionId: null,
+      };
+      pushLog(record, 'error', `assignment deferred: ${DEFERRED_ERROR_MESSAGE}`);
+    } catch (error) {
+      record.status = 'cancelled';
+      record.result = {
+        status: 'cancelled',
+        classification: 'unknown',
+        errorType: 'Cancelled',
+        errorMessage: error instanceof Error ? error.message.slice(0, 4000) : 'Cancelled.',
+        durationMs: Date.now() - startedAt,
+        stepResults: record.stepResults,
+        logs: record.logs,
+        screenshots: [],
+        appiumSessionId: null,
+      };
+      pushLog(record, 'error', `assignment ${record.status}: ${record.result.errorMessage}`);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  function contractProblems(body: unknown): string[] {
+    if (!body || typeof body !== 'object') return ['Assignment must be a JSON object.'];
+    const assignment = body as Partial<MobileAssignment>;
+    const problems: string[] = [];
+    if (!assignment.assignmentId) problems.push('assignmentId is required.');
+    if (!assignment.executionId) problems.push('executionId is required.');
+    if ((assignment.framework ?? '').toLowerCase() !== 'appium') {
+      problems.push("framework must be 'appium'.");
+    }
+    if (!assignment.platform || typeof assignment.platform !== 'string' || assignment.platform.trim().length === 0) {
+      problems.push('platform is required.');
+    }
+    problems.push(...validateMobileSteps((assignment.steps ?? []) as MobileAssignment['steps']));
+    // Redact password-like values at the boundary (defense in depth; the API
+    // already redacts before dispatch).
+    for (const step of assignment.steps ?? []) {
+      step.value = redactStepValue(step.action, step.target, step.value) ?? step.value;
+    }
+    return problems;
+  }
+
+  const server = createServer((req, res) => {
+    void (async () => {
+      const url = new URL(req.url ?? '/', 'http://localhost');
+      if (req.method === 'GET' && url.pathname === '/health') {
+        const drained = shuttingDown || draining;
+        sendJson(res, drained ? 503 : 200, {
+          status: drained ? 'draining' : 'healthy',
+          workerId: config.workerId,
+          workerKey: config.workerKey,
+          taskQueue: config.taskQueue,
+          capacity: config.capacity,
+          activeAssignments: activeCount(),
+        });
+        return;
+      }
+      if (!req.url?.startsWith('/v1/assignments')) {
+        sendJson(res, 404, { error: 'Not found.' });
+        return;
+      }
+      if (!authorized(req)) {
+        sendJson(res, 401, { error: 'Unauthorized.' });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/v1/assignments') {
+        if (shuttingDown || draining) {
+          sendJson(res, 503, { error: 'Worker is draining.' });
+          return;
+        }
+        if (activeCount() >= Math.max(1, config.capacity)) {
+          sendJson(res, 429, { error: 'Worker is at capacity.' });
+          return;
+        }
+        let body: unknown;
+        try {
+          body = await readJson(req);
+        } catch (error) {
+          sendJson(res, 400, { error: error instanceof Error ? error.message : 'Bad request.' });
+          return;
+        }
+        const problems = contractProblems(body);
+        if (problems.length > 0) {
+          sendJson(res, 400, { error: 'Invalid assignment.', details: problems });
+          return;
+        }
+        const assignment = body as MobileAssignment;
+        if (!assignment.assignmentToken) {
+          sendJson(res, 400, { error: 'Assignment token is required.' });
+          return;
+        }
+        if (assignments.has(assignment.assignmentId)) {
+          sendJson(res, 200, progressOf(assignments.get(assignment.assignmentId)!));
+          return;
+        }
+        const record: MobileAssignmentRecord = {
+          assignment,
+          assignmentToken: assignment.assignmentToken,
+          status: 'queued',
+          currentStepOrder: null,
+          stepResults: [],
+          logs: [],
+          result: null,
+          abort: new AbortController(),
+          startedAtUnixMs: Date.now(),
+        };
+        assignments.set(assignment.assignmentId, record);
+        void runDeferred(record);
+        sendJson(res, 202, progressOf(record));
+        return;
+      }
+
+      const match = /^\/v1\/assignments\/([^/]+)$/.exec(url.pathname);
+      if (!match) {
+        sendJson(res, 404, { error: 'Not found.' });
+        return;
+      }
+      const record = assignments.get(match[1]!);
+      if (!record) {
+        sendJson(res, 404, { error: 'Assignment not found.' });
+        return;
+      }
+      if (req.method === 'GET') {
+        sendJson(res, 200, progressOf(record));
+        return;
+      }
+      if (req.method === 'DELETE') {
+        if (record.status === 'queued' || record.status === 'running') {
+          record.abort.abort(new Error('Cancelled via API.'));
+        }
+        sendJson(res, 200, progressOf(record));
+        return;
+      }
+      sendJson(res, 405, { error: 'Method not allowed.' });
+    })().catch((error: unknown) => {
+      log('error', `request failed: ${error instanceof Error ? error.message : 'unknown'}`);
+      if (!res.headersSent) sendJson(res, 500, { error: 'Internal worker error.' });
+    });
+  });
+
+  return {
+    listen: (port?: number) =>
+      new Promise<void>((resolve) => {
+        server.listen(port ?? config.healthPort, () => {
+          log(
+            'info',
+            `appium worker listening (auth ${config.apiToken ? 'enabled' : 'DISABLED — set WORKER_API_TOKEN'})`,
+          );
+          resolve();
+        });
+      }),
+    close: () =>
+      new Promise<void>((resolve) => {
+        shuttingDown = true;
+        server.close(() => resolve());
+      }),
+    activeAssignments: () => activeCount(),
+    setDraining: (value: boolean) => {
+      draining = value;
+      if (value) log('info', 'grid directed drain: no new assignments accepted');
+    },
+  };
+}

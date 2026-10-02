@@ -5,6 +5,8 @@ export interface StartExecutionInput {
   environmentId?: string;
   browser?: string;
   idempotencyKey?: string;
+  mobileDevicePoolId?: string;
+  mobileAppId?: string;
 }
 
 export interface StartExecutionResult {
