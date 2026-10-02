@@ -92,6 +92,13 @@ public sealed class MobileDeviceSlot : EntityBase
     /// <summary>Future owning assignment. Unused by registry CRUD.</summary>
     public Guid? AssignmentId { get; set; }
 
+    /// <summary>
+    /// Owning grid worker for a claimed slot (Phase 3 Slice 3C-3 scheduling).
+    /// Set atomically with the claim inside the scheduler ownership
+    /// transaction; null when the slot is free. Never an Appium capability.
+    /// </summary>
+    public Guid? WorkerId { get; set; }
+
     /// <summary>Optimistic concurrency token for future claim/release writes.</summary>
     public byte[]? RowVersion { get; set; }
 }

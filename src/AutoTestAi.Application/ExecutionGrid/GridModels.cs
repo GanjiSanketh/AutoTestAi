@@ -96,6 +96,17 @@ public sealed record GridClaim(
     Guid AssignmentToken);
 
 /// <summary>
+/// An atomically established mobile lease: worker capacity, slot claim,
+/// grid assignment, and execution-test binding committed in one transaction.
+/// </summary>
+public sealed record MobileGridClaim(
+    GridAssignment Assignment,
+    GridWorker Worker,
+    MobileDeviceSlot Slot,
+    Guid AssignmentToken,
+    Guid ClaimToken);
+
+/// <summary>
 /// Read-only worker/grid administration (Slice 9). Worker credential
 /// verification backs the machine-auth endpoint filter.
 /// </summary>
@@ -132,6 +143,16 @@ public interface IGridScheduler
     /// must stay queued (no capacity). Throws ConflictException/NotFoundException
     /// when the execution can never run.</summary>
     Task<GridClaim?> TryClaimAsync(
+        Guid executionId, IReadOnlySet<Guid> excludeWorkerIds, CancellationToken ct);
+
+    /// <summary>
+    /// Atomically claims a mobile worker lease plus a device slot lease
+    /// (worker capacity + slot claim + assignment + test binding in one
+    /// transaction), or returns null when the execution must stay queued.
+    /// Throws ConflictException/NotFoundException when the execution can
+    /// never run as mobile. Web scheduling path is unaffected.
+    /// </summary>
+    Task<MobileGridClaim?> TryClaimMobileAsync(
         Guid executionId, IReadOnlySet<Guid> excludeWorkerIds, CancellationToken ct);
 
     Task RenewLeaseAsync(Guid assignmentId, CancellationToken ct);

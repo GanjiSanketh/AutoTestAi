@@ -355,8 +355,18 @@ public sealed class AutoTestAiDbContext : DbContext
             .HasIndex(s => new { s.DeviceId, s.SlotNumber })
             .IsUnique()
             .HasDatabaseName("IX_mobile_slots_Device_SlotNumber");
-        // Future lease-recovery lookup: stale claimed slots by expiry.
-        modelBuilder.Entity<MobileDeviceSlot>().HasIndex(s => s.ClaimExpiresAt);
+        // Slice 3C-3 scheduling scans: eligible slots per pool, reaper
+        // scans by status/expiry, and renew/release/reap linkage checks
+        // from the linked assignment side.
+        modelBuilder.Entity<MobileDeviceSlot>()
+            .HasIndex(s => new { s.PoolId, s.Status })
+            .HasDatabaseName("IX_mobile_slots_Pool_Status");
+        modelBuilder.Entity<MobileDeviceSlot>()
+            .HasIndex(s => new { s.Status, s.ClaimExpiresAt })
+            .HasDatabaseName("IX_mobile_slots_Status_ClaimExpiresAt");
+        modelBuilder.Entity<MobileDeviceSlot>()
+            .HasIndex(s => s.AssignmentId)
+            .HasDatabaseName("IX_mobile_slots_AssignmentId");
         modelBuilder.Entity<MobileDeviceSlot>()
             .HasOne<MobileDevice>()
             .WithMany()

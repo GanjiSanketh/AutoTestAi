@@ -15,17 +15,20 @@ public sealed class GridLeaseManager : IGridLeaseManager
     private readonly IGridAssignmentStore _assignments;
     private readonly IGridWorkerStore _workers;
     private readonly IExecutionStore _executions;
+    private readonly IMobileSlotLeaseService _slotLeases;
     private readonly ILogger<GridLeaseManager> _logger;
 
     public GridLeaseManager(
         IGridAssignmentStore assignments,
         IGridWorkerStore workers,
         IExecutionStore executions,
+        IMobileSlotLeaseService slotLeases,
         ILogger<GridLeaseManager> logger)
     {
         _assignments = assignments;
         _workers = workers;
         _executions = executions;
+        _slotLeases = slotLeases;
         _logger = logger;
     }
 
@@ -94,6 +97,20 @@ public sealed class GridLeaseManager : IGridLeaseManager
             {
                 worker.ActiveAssignmentCount = Math.Max(0, worker.ActiveAssignmentCount - 1);
                 worker.RowVersion++;
+            }
+            // Mobile piggyback: release the linked slot in the same
+            // transaction when present. Linkage-checked and best-effort,
+            // inside the existing never-throw contract.
+            try
+            {
+                var slot = await _slotLeases.FindByAssignmentAsync(assignment.Id, ct);
+                if (slot is not null)
+                    _slotLeases.TryStageRelease(slot, assignment.Id);
+            }
+            catch (Exception stageEx)
+            {
+                _logger.LogWarning(stageEx,
+                    "Linked slot release staging failed for assignment {AssignmentId}.", assignmentId);
             }
             await _assignments.SaveChangesAsync(ct);
             _logger.LogInformation("Lease {AssignmentId} released as {Status} for execution test {ExecutionTestId}.",

@@ -62,6 +62,23 @@ public sealed class MobileRegistryTests
         public Task<IReadOnlyList<MobileDeviceSlot>> ListSlotsByDeviceAsync(Guid deviceId, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<MobileDeviceSlot>>(Slots.Where(s => s.DeviceId == deviceId).ToList());
         public Task AddSlotAsync(MobileDeviceSlot slot, CancellationToken ct) { Slots.Add(slot); return Task.CompletedTask; }
+        public Task<MobileDeviceSlot?> GetSlotByIdAsync(Guid slotId, CancellationToken ct)
+            => Task.FromResult(Slots.FirstOrDefault(s => s.Id == slotId));
+        public Task<IReadOnlyList<MobileDeviceSlot>> ListSlotsForClaimAsync(Guid projectId, Guid poolId, int take, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<MobileDeviceSlot>>(Slots
+                .Where(s => s.ProjectId == projectId && s.PoolId == poolId)
+                .OrderBy(s => s.SlotNumber).ThenBy(s => s.Id).Take(take).ToList());
+        public Task<MobileDeviceSlot?> FindSlotByAssignmentAsync(Guid assignmentId, CancellationToken ct)
+            => Task.FromResult(Slots.FirstOrDefault(s => s.AssignmentId == assignmentId));
+        public Task<IReadOnlyList<MobileDeviceSlot>> ListExpiredSlotsAsync(DateTimeOffset now, int take, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<MobileDeviceSlot>>(Slots
+                .Where(s => s.Status != MobileSlotStatus.Free && s.Status != MobileSlotStatus.Released &&
+                            s.ClaimExpiresAt != null && s.ClaimExpiresAt <= now)
+                .OrderBy(s => s.ClaimExpiresAt).Take(take).ToList());
+        public Task<IReadOnlyList<MobileDeviceSlot>> ListReleasedSlotsAsync(int take, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<MobileDeviceSlot>>(Slots
+                .Where(s => s.Status == MobileSlotStatus.Released)
+                .OrderBy(s => s.UpdatedAt).Take(take).ToList());
         public Task<MobileApp?> GetAppByIdAsync(Guid id, CancellationToken ct)
             => Task.FromResult(Apps.TryGetValue(id, out var a) ? a : null);
         public Task<IReadOnlyList<MobileApp>> ListAppsAsync(Guid projectId, CancellationToken ct)

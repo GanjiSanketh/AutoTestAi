@@ -35,6 +35,8 @@ builder.Services.Configure<AutoTestAi.Application.TestExecution.WorkerOptions>(
     builder.Configuration.GetSection(AutoTestAi.Application.TestExecution.WorkerOptions.SectionName));
 builder.Services.Configure<AutoTestAi.Application.ExecutionGrid.GridOptions>(
     builder.Configuration.GetSection(AutoTestAi.Application.ExecutionGrid.GridOptions.SectionName));
+builder.Services.Configure<AutoTestAi.Application.ExecutionGrid.MobileOptions>(
+    builder.Configuration.GetSection(AutoTestAi.Application.ExecutionGrid.MobileOptions.SectionName));
 builder.Services.Configure<AutoTestAi.Application.AI.FailureAnalysisOptions>(
     builder.Configuration.GetSection(AutoTestAi.Application.AI.FailureAnalysisOptions.SectionName));
 builder.Services.Configure<AutoTestAi.Application.Tickets.TicketOptions>(

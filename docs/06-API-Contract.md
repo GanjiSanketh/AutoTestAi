@@ -772,9 +772,9 @@ only; `FailureAnalysisCompleted` is published on success.
  H u b :   ` / h u b s / e x e c u t i o n `   ( s a m e   a s   S l i c e   5 )  
   
  N e w   e v e n t s :  
- -   ` E x e c u t i o n Q u e u e d `   â ¬    e x e c u t i o n   i s   w a i t i n g   f o r   g r i d   c a p a c i t y  
- -   ` E x e c u t i o n A s s i g n e d `   â ¬    a   g r i d   l e a s e   w a s   c l a i m e d   o n   a   w o r k e r  
- -   ` W o r k e r S t a t u s C h a n g e d `   â ¬    w o r k e r   l i f e c y c l e / h e a l t h   c h a n g e d  
+ -   ` E x e c u t i o n Q u e u e d `   ï¿½ ï¿½    e x e c u t i o n   i s   w a i t i n g   f o r   g r i d   c a p a c i t y  
+ -   ` E x e c u t i o n A s s i g n e d `   ï¿½ ï¿½    a   g r i d   l e a s e   w a s   c l a i m e d   o n   a   w o r k e r  
+ -   ` W o r k e r S t a t u s C h a n g e d `   ï¿½ ï¿½    w o r k e r   l i f e c y c l e / h e a l t h   c h a n g e d  
   
  P a y l o a d s   c a r r y   i d e n t i f i e r s   o n l y ;   n o   c r e d e n t i a l s   o r   s e c r e t s .  
   
@@ -872,3 +872,13 @@ heartbeat, worker-registration, or execution endpoints exist in this checkpoint.
 mobile.pool/device/app_created/updated/enabled/disabled/registered carry safe identifiers only.
 Appium execution, slot leasing, CI mobile fan-out, self-healing, video, cloud device farms, and
 real-iOS support are NOT part of this contract.
+## Slice 3C-3 - Mobile Slot Leasing & Scheduling
+
+No new public REST endpoints. Slot leasing is scheduler-internal: worker capacity, slot claim,
+assignment creation, and execution-test binding commit atomically in one persistence boundary
+(shared scoped DbContext + one SaveChangesAsync; no new transaction abstraction). Mobile worker
+registration extends the existing worker plane (`WorkerType`/`Framework` `appium`, no browsers).
+Audit `mobile.slot_claimed/claim_conflict/renewed/released/expired/recovered` carries identifiers
+only; metrics `mobile_slot_*` carry platform/result labels only. Assignment renew/release/reap
+extend linked slot transitions in-transaction (no-ops for web executions). Appium session
+creation, step execution, dispatch, and device heartbeat extension remain future work.

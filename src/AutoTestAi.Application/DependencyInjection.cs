@@ -64,6 +64,7 @@ public static class DependencyInjection
         services.AddScoped<ExecutionGrid.IExecutionGridService, ExecutionGrid.ExecutionGridService>();
         services.AddScoped<ExecutionGrid.IGridScheduler, ExecutionGrid.GridScheduler>();
         services.AddScoped<ExecutionGrid.IGridLeaseManager, ExecutionGrid.GridLeaseManager>();
+        services.AddScoped<ExecutionGrid.IMobileSlotLeaseService, ExecutionGrid.MobileSlotLeaseService>();
         services.AddScoped<IAiTestGenerator, TestGenerationService>();
         services.AddScoped<IAuditService, AuditService>();
         return services;

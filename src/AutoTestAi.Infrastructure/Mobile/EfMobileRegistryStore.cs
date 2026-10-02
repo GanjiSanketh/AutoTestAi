@@ -54,6 +54,37 @@ public sealed class EfMobileRegistryStore : IMobileRegistryStore
     public async Task AddSlotAsync(MobileDeviceSlot slot, CancellationToken ct)
         => await _db.MobileDeviceSlots.AddAsync(slot, ct);
 
+    public Task<MobileDeviceSlot?> GetSlotByIdAsync(Guid slotId, CancellationToken ct)
+        => _db.MobileDeviceSlots.FirstOrDefaultAsync(s => s.Id == slotId, ct);
+
+    public async Task<IReadOnlyList<MobileDeviceSlot>> ListSlotsForClaimAsync(
+        Guid projectId, Guid poolId, int take, CancellationToken ct)
+        => await _db.MobileDeviceSlots.AsNoTracking()
+            .Where(s => s.ProjectId == projectId && s.PoolId == poolId)
+            .OrderBy(s => s.SlotNumber)
+            .ThenBy(s => s.Id)
+            .Take(take)
+            .ToListAsync(ct);
+
+    public Task<MobileDeviceSlot?> FindSlotByAssignmentAsync(Guid assignmentId, CancellationToken ct)
+        => _db.MobileDeviceSlots.FirstOrDefaultAsync(s => s.AssignmentId == assignmentId, ct);
+
+    public async Task<IReadOnlyList<MobileDeviceSlot>> ListExpiredSlotsAsync(DateTimeOffset now, int take, CancellationToken ct)
+        => await _db.MobileDeviceSlots.AsNoTracking()
+            .Where(s => s.Status != Domain.Enums.MobileSlotStatus.Free &&
+                        s.Status != Domain.Enums.MobileSlotStatus.Released &&
+                        s.ClaimExpiresAt != null && s.ClaimExpiresAt <= now)
+            .OrderBy(s => s.ClaimExpiresAt)
+            .Take(take)
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<MobileDeviceSlot>> ListReleasedSlotsAsync(int take, CancellationToken ct)
+        => await _db.MobileDeviceSlots.AsNoTracking()
+            .Where(s => s.Status == Domain.Enums.MobileSlotStatus.Released)
+            .OrderBy(s => s.UpdatedAt)
+            .Take(take)
+            .ToListAsync(ct);
+
     public Task<MobileApp?> GetAppByIdAsync(Guid appId, CancellationToken ct)
         => _db.MobileApps.FirstOrDefaultAsync(a => a.Id == appId, ct);
 

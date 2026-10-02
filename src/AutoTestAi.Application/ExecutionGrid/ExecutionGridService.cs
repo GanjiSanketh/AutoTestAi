@@ -78,17 +78,25 @@ public sealed partial class ExecutionGridService : IExecutionGridService
             errors.Add(new FieldError("workerKey",
                 "Worker key must be 3-100 characters: letters, digits, '.', '_' or '-'."));
         var workerType = (command.WorkerType ?? "playwright").Trim().ToLowerInvariant();
-        if (workerType != "playwright")
-            errors.Add(new FieldError("workerType", "Only the 'playwright' worker type is supported."));
-        var framework = (command.Framework ?? "playwright").Trim().ToLowerInvariant();
-        if (framework != "playwright")
-            errors.Add(new FieldError("framework", "Only the 'playwright' framework is supported."));
+        var isMobile = string.Equals(workerType, "appium", StringComparison.Ordinal);
+        if (!isMobile && workerType != "playwright")
+            errors.Add(new FieldError("workerType", "Worker type must be 'playwright' or 'appium'."));
+        var framework = (command.Framework ?? workerType).Trim().ToLowerInvariant();
+        if (framework != workerType)
+            errors.Add(new FieldError("framework", "Framework must match the worker type ('playwright' or 'appium')."));
         var browsers = (command.Browsers ?? Array.Empty<string>())
             .Where(b => !string.IsNullOrWhiteSpace(b))
             .Select(b => b.Trim().ToLowerInvariant())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        if (browsers.Count == 0 || browsers.Any(b => !SupportedBrowsers.Contains(b)))
+        if (isMobile)
+        {
+            // Mobile workers advertise no browsers; platform selection flows
+            // through device pools/slots, not the browser capability list.
+            if (browsers.Count != 0)
+                errors.Add(new FieldError("browsers", "Mobile workers must not advertise browsers."));
+        }
+        else if (browsers.Count == 0 || browsers.Any(b => !SupportedBrowsers.Contains(b)))
             errors.Add(new FieldError("browsers", "At least one supported browser is required ('chromium', 'firefox' or 'webkit')."));
         var capacity = command.Capacity ?? settings.DefaultWorkerCapacity;
         if (capacity < 1 || capacity > settings.MaxWorkerCapacity)

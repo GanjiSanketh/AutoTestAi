@@ -543,3 +543,31 @@ Management requires `settings.manage`, reads `executions.read`; audit
 safe metadata only. Slot leasing, Appium worker (`workers/appium`),
 mobile execution, CI fan-out, self-healing, video, cloud farms, and real-iOS
 support are explicitly FUTURE and must not be inferred from this foundation.
+
+## 17. Mobile Slot Leasing & Grid Scheduling (Phase 3 Slice 3C-3)
+
+Mobile scheduling reuses the existing execution grid: no second scheduler,
+no second lease architecture. A mobile claim atomically establishes worker
+capacity (`ActiveAssignmentCount` + `RowVersion`), slot lease
+(`Status=Claimed`, `ClaimToken`, `ClaimExpiresAt`, `WorkerId`,
+`AssignmentId`), `GridAssignment` (with its own `AssignmentToken`), and
+`ExecutionTest` binding in ONE `SaveChangesAsync` persistence boundary over
+the shared scoped `DbContext` — the repository has no explicit transaction
+abstraction, and none was introduced. `ClaimToken` (slot ownership) and
+`AssignmentToken` (execution fencing) stay distinct control-plane values,
+never Appium capabilities. `GridScheduler.TryClaimMobileAsync` selects
+deterministically (appium workers by least-load/`WorkerKey`, slots by
+`SlotNumber`/`SlotId`) after validating project/pool/device/app platform
+compatibility; `IMobileSlotLeaseService` stages ownership without committing
+(the scheduler owns the save), while activate/renew/release/reap commit
+themselves. Assignment renew/release/reap piggyback linked-slot transitions
+in the same transaction (no-ops when no slot is linked, so web behavior is
+unchanged). The slot reaper never frees a slot whose linked assignment is
+still active; `Claimed + AssignmentId NULL` is not a valid scheduler output
+(grace-gated anomaly recovery only). Renewal piggybacks assignment renewal;
+no second heartbeat architecture. Metrics `mobile_slot_*` carry
+platform/result labels only; audit `mobile.slot_claimed/conflict/renewed/
+released/expired/recovered` carries identifiers only. Worker registration
+accepts `appium`/`appium` (browsers must be empty); Playwright rules
+unchanged. Appium session creation, step execution, and dispatch remain
+FUTURE: this slice schedules and leases only.

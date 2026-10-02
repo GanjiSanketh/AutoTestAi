@@ -18,6 +18,11 @@ public sealed class UnavailableMobileRegistryStore : IMobileRegistryStore
     public Task AddDeviceAsync(MobileDevice device, CancellationToken ct) => throw Unavailable();
     public Task<IReadOnlyList<MobileDeviceSlot>> ListSlotsByDeviceAsync(Guid deviceId, CancellationToken ct) => throw Unavailable();
     public Task AddSlotAsync(MobileDeviceSlot slot, CancellationToken ct) => throw Unavailable();
+    public Task<MobileDeviceSlot?> GetSlotByIdAsync(Guid slotId, CancellationToken ct) => throw Unavailable();
+    public Task<IReadOnlyList<MobileDeviceSlot>> ListSlotsForClaimAsync(Guid projectId, Guid poolId, int take, CancellationToken ct) => throw Unavailable();
+    public Task<MobileDeviceSlot?> FindSlotByAssignmentAsync(Guid assignmentId, CancellationToken ct) => throw Unavailable();
+    public Task<IReadOnlyList<MobileDeviceSlot>> ListExpiredSlotsAsync(DateTimeOffset now, int take, CancellationToken ct) => throw Unavailable();
+    public Task<IReadOnlyList<MobileDeviceSlot>> ListReleasedSlotsAsync(int take, CancellationToken ct) => throw Unavailable();
     public Task<MobileApp?> GetAppByIdAsync(Guid appId, CancellationToken ct) => throw Unavailable();
     public Task<IReadOnlyList<MobileApp>> ListAppsAsync(Guid projectId, CancellationToken ct) => throw Unavailable();
     public Task AddAppAsync(MobileApp app, CancellationToken ct) => throw Unavailable();
