@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },
-  "dependencies": {},
+  "dependencies": {
+    "webdriverio": "9.32.0"
+  },
   "devDependencies": {
     "@types/node": "22.18.0",
     "typescript": "5.9.2",

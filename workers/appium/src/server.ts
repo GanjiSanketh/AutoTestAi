@@ -17,6 +17,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import type { MobileWorkerConfig } from './config.js';
+import {
+  WebdriverIoDriver,
+  classifyDriverError,
+  parseAppiumServerUrl,
+  type IMobileDriver,
+} from './driver.js';
+import { isHttpAppUrl, stageAppBinary, type StagedAppBinary } from './appBinary.js';
 import { redactStepValue } from './redaction.js';
 import { validateMobileSteps } from './steps.js';
 import type {
@@ -36,17 +43,18 @@ interface MobileAssignmentRecord {
   stepResults: MobileStepResult[];
   logs: MobileLog[];
   result: MobileResult | null;
+  /** Appium session id once established; null before creation or after close. Never logged. */
+  appiumSessionId: string | null;
   abort: AbortController;
   startedAtUnixMs: number;
 }
 
 const MAX_LOGS = 2000;
 
-/** Deferred-execution marker: honest terminal result for the scaffold slice. */
-export const DEFERRED_ERROR_TYPE = 'NotImplemented';
-export const DEFERRED_ERROR_MESSAGE = 'Mobile execution is not implemented in this worker build.';
-
-export function createMobileWorkerServer(config: MobileWorkerConfig): {
+export function createMobileWorkerServer(
+  config: MobileWorkerConfig,
+  deps?: { createDriver?: () => IMobileDriver },
+): {
   listen: (port?: number) => Promise<void>;
   close: () => Promise<void>;
   /** Active (queued/running) assignment count for grid heartbeats. */
@@ -57,6 +65,9 @@ export function createMobileWorkerServer(config: MobileWorkerConfig): {
   const assignments = new Map<string, MobileAssignmentRecord>();
   let shuttingDown = false;
   let draining = false;
+  // One driver per server: session handles stay addressable for shutdown
+  // cleanup even after individual runs settle.
+  const driver = (deps?.createDriver ?? (() => new WebdriverIoDriver()))();
 
   function activeCount(): number {
     let count = 0;
@@ -117,6 +128,7 @@ export function createMobileWorkerServer(config: MobileWorkerConfig): {
       stepResults: record.stepResults,
       logs: record.logs,
       result: record.result,
+      appiumSessionId: record.appiumSessionId,
     };
   }
 
@@ -133,11 +145,14 @@ export function createMobileWorkerServer(config: MobileWorkerConfig): {
   }
 
   /**
-   * Deferred execution (Slice 3C-4A): no driver exists yet, so the validated
-   * assignment completes immediately with an explicit not-implemented
-   * outcome. The execution slice replaces this body with real Appium runs.
+   * Mobile runtime (Slice 3C-4B-1): create a real Appium session, then hold
+   * a controlled "session established" state until cancellation, timeout,
+   * or shutdown. Steps are validated but NOT executed here — the action
+   * engine slice owns step execution. Terminal outcomes only arise from
+   * cancellation, timeout, or session failure; success is never reported
+   * for work not performed.
    */
-  async function runDeferred(record: MobileAssignmentRecord): Promise<void> {
+  async function runMobile(record: MobileAssignmentRecord): Promise<void> {
     const { assignment } = record;
     const startedAt = Date.now();
     // Yield so the 202 acceptance is sent while the record is still queued,
@@ -147,37 +162,125 @@ export function createMobileWorkerServer(config: MobileWorkerConfig): {
       () => record.abort.abort(new Error('Execution timeout.')),
       Math.min(assignment.timeouts.executionMs, config.executionTimeoutMs),
     );
-    record.status = 'running';
-    pushLog(record, 'info', `worker ${config.workerId} accepted assignment ${assignment.assignmentId} (deferred: no driver)`);
-    try {
-      if (record.abort.signal.aborted) throw new Error('Cancelled via API.');
-      record.status = 'error';
+    let sessionId: string | null = null;
+    let stagedApp: StagedAppBinary | null = null;
+    const finish = (
+      status: MobileResult['status'],
+      classification: MobileResult['classification'],
+      errorType: string | null,
+      errorMessage: string | null,
+    ): void => {
+      record.status = status;
       record.result = {
-        status: 'error',
-        classification: 'automation',
-        errorType: DEFERRED_ERROR_TYPE,
-        errorMessage: DEFERRED_ERROR_MESSAGE,
-        durationMs: Date.now() - startedAt,
-        stepResults: [],
-        logs: record.logs,
-        screenshots: [],
-        appiumSessionId: null,
-      };
-      pushLog(record, 'error', `assignment deferred: ${DEFERRED_ERROR_MESSAGE}`);
-    } catch (error) {
-      record.status = 'cancelled';
-      record.result = {
-        status: 'cancelled',
-        classification: 'unknown',
-        errorType: 'Cancelled',
-        errorMessage: error instanceof Error ? error.message.slice(0, 4000) : 'Cancelled.',
+        status,
+        classification,
+        errorType,
+        errorMessage,
         durationMs: Date.now() - startedAt,
         stepResults: record.stepResults,
         logs: record.logs,
         screenshots: [],
-        appiumSessionId: null,
+        appiumSessionId: sessionId,
       };
-      pushLog(record, 'error', `assignment ${record.status}: ${record.result.errorMessage}`);
+    };
+    const closeSession = async (): Promise<void> => {
+      if (stagedApp !== null) {
+        const staged = stagedApp;
+        stagedApp = null;
+        await staged.cleanup();
+      }
+      if (sessionId === null) return;
+      const closing = sessionId;
+      sessionId = null;
+      record.appiumSessionId = null;
+      try {
+        await driver.deleteSession(closing);
+        pushLog(record, 'info', 'appium session closed');
+      } catch (error) {
+        pushLog(
+          record,
+          'warning',
+          `appium session cleanup failed: ${error instanceof Error ? error.message.slice(0, 200) : 'unknown'}`,
+        );
+      }
+    };
+    record.status = 'running';
+    pushLog(record, 'info', `worker ${config.workerId} accepted assignment ${assignment.assignmentId}`);
+    try {
+      if (record.abort.signal.aborted) throw new Error('Cancelled via API.');
+      let endpoint;
+      try {
+        endpoint = parseAppiumServerUrl(config.appiumServerUrl);
+      } catch (error) {
+        const classified = classifyDriverError(error);
+        finish('error', classified.kind, 'InvalidEndpoint', classified.message);
+        pushLog(record, 'error', `assignment failed: ${classified.message}`);
+        return;
+      }
+      try {
+        // Install/Reinstall: stage the server-minted binary to a
+        // worker-controlled temp path. Preinstalled skips this entirely.
+        // Effective capabilities carry the temp path, never the URL.
+        let effectiveCapabilities = assignment.capabilities;
+        if (isHttpAppUrl(assignment.capabilities.app)) {
+          try {
+            stagedApp = await stageAppBinary(assignment.capabilities.app!, record.abort.signal);
+          } catch (error) {
+            const classified = classifyDriverError(error);
+            finish('error', classified.kind, 'AppDownloadFailed', classified.message);
+            pushLog(record, 'error', `assignment failed: ${classified.message}`);
+            return;
+          }
+          effectiveCapabilities = { ...assignment.capabilities, app: stagedApp.path };
+        }
+        const handle = await driver.createSession(effectiveCapabilities, {
+          endpoint,
+          newCommandTimeoutMs: Math.min(
+            assignment.timeouts.executionMs,
+            config.executionTimeoutMs,
+          ),
+          signal: record.abort.signal,
+        });
+        sessionId = handle.sessionId;
+      } catch (error) {
+        const classified = classifyDriverError(error);
+        finish('error', classified.kind, 'SessionCreationFailed', classified.message);
+        pushLog(record, 'error', `assignment failed: ${classified.message}`);
+        await closeSession();
+        return;
+      }
+      record.appiumSessionId = sessionId;
+      pushLog(record, 'info', 'appium session established; awaiting execution slice');
+      // Deferred: hold the established session until cancellation, timeout,
+      // or shutdown. No steps run in this checkpoint.
+      await new Promise<void>((_, reject) => {
+        if (record.abort.signal.aborted) {
+          reject(new Error('Cancelled via API.'));
+          return;
+        }
+        record.abort.signal.addEventListener('abort', () => reject(new Error('Cancelled via API.')), {
+          once: true,
+        });
+      });
+      throw new Error('Unreachable: abort always settles the wait above.');
+    } catch (error) {
+      const cancelled =
+        error instanceof Error &&
+        (record.abort.signal.aborted || /cancelled via api/i.test(error.message));
+      const timedOut =
+        !cancelled &&
+        error instanceof Error &&
+        (/execution timeout/i.test(error.message) || /timed out/i.test(error.message));
+      await closeSession();
+      if (cancelled) {
+        finish('cancelled', 'unknown', 'Cancelled', 'Cancelled via API.');
+      } else if (timedOut) {
+        finish('timedOut', 'environment', 'TimeoutError', 'Mobile execution timed out.');
+      } else {
+        const classified = classifyDriverError(error);
+        finish('error', classified.kind, 'WorkerError', classified.message);
+      }
+      pushLog(record, 'error', `assignment ${record.status}: ${record.result?.errorMessage ?? 'unknown'}`);
     } finally {
       clearTimeout(timeout);
     }
@@ -266,11 +369,12 @@ export function createMobileWorkerServer(config: MobileWorkerConfig): {
           stepResults: [],
           logs: [],
           result: null,
+          appiumSessionId: null,
           abort: new AbortController(),
           startedAtUnixMs: Date.now(),
         };
         assignments.set(assignment.assignmentId, record);
-        void runDeferred(record);
+        void runMobile(record);
         sendJson(res, 202, progressOf(record));
         return;
       }
@@ -317,7 +421,15 @@ export function createMobileWorkerServer(config: MobileWorkerConfig): {
     close: () =>
       new Promise<void>((resolve) => {
         shuttingDown = true;
-        server.close(() => resolve());
+        const open = [...assignments.values()].filter((r) => r.appiumSessionId !== null);
+        for (const record of assignments.values()) {
+          if (record.status === 'queued' || record.status === 'running') {
+            record.abort.abort(new Error('Worker shutting down.'));
+          }
+        }
+        void Promise.allSettled(open.map((r) => driver.deleteSession(r.appiumSessionId!))).then(() => {
+          server.close(() => resolve());
+        });
       }),
     activeAssignments: () => activeCount(),
     setDraining: (value: boolean) => {

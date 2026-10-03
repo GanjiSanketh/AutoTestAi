@@ -84,6 +84,10 @@ public sealed class MobileRegistryTests
         public Task<IReadOnlyList<MobileApp>> ListAppsAsync(Guid projectId, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<MobileApp>>(Apps.Values.Where(a => a.ProjectId == projectId).ToList());
         public Task AddAppAsync(MobileApp app, CancellationToken ct) { Apps[app.Id] = app; return Task.CompletedTask; }
+        public Task<MobileDeviceSession?> GetSessionByIdAsync(Guid id, CancellationToken ct) => throw new NotImplementedException();
+        public Task<MobileDeviceSession?> FindSessionByAssignmentAsync(Guid id, CancellationToken ct) => throw new NotImplementedException();
+        public Task<IReadOnlyList<MobileDeviceSession>> ListStaleSessionsAsync(DateTimeOffset s, int take, CancellationToken ct) => throw new NotImplementedException();
+        public Task AddSessionAsync(MobileDeviceSession session, CancellationToken ct) => throw new NotImplementedException();
         public Task SaveChangesAsync(CancellationToken ct)
         {
             if (ThrowDuplicateOnSave)

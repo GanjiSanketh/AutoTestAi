@@ -43,6 +43,20 @@ public interface IMobileRegistryStore
     /// <summary>Reaper scan: released slots awaiting recycling verification.</summary>
     Task<IReadOnlyList<MobileDeviceSlot>> ListReleasedSlotsAsync(int take, CancellationToken ct);
 
+    /// <summary>Tracked session lookup for lifecycle writes.</summary>
+    Task<MobileDeviceSession?> GetSessionByIdAsync(Guid sessionId, CancellationToken ct);
+
+    /// <summary>Reverse linkage: runtime session currently bound to an assignment.</summary>
+    Task<MobileDeviceSession?> FindSessionByAssignmentAsync(Guid assignmentId, CancellationToken ct);
+
+    /// <summary>
+    /// Orphan sweep: non-closed sessions whose heartbeat went stale, oldest first.
+    /// Bounded; the caller decides terminal transitions.
+    /// </summary>
+    Task<IReadOnlyList<MobileDeviceSession>> ListStaleSessionsAsync(DateTimeOffset staleBefore, int take, CancellationToken ct);
+
+    Task AddSessionAsync(MobileDeviceSession session, CancellationToken ct);
+
     Task<MobileApp?> GetAppByIdAsync(Guid appId, CancellationToken ct);
     Task<IReadOnlyList<MobileApp>> ListAppsAsync(Guid projectId, CancellationToken ct);
     Task AddAppAsync(MobileApp app, CancellationToken ct);

@@ -129,6 +129,9 @@ export interface MobileAssignmentProgress {
   stepResults: MobileStepResult[];
   logs: MobileLog[];
   result?: MobileResult | null;
+  /** Present once the Appium session exists; echoed so the control plane
+   * can bind the runtime session row without trusting worker logs. */
+  appiumSessionId?: string | null;
 }
 
 /** MVP closed action set (Slice 3C-4A). Unknown actions fail safely. */

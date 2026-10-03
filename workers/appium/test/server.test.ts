@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMobileWorkerServer } from '../src/server.js';
+import type { IMobileDriver, SessionHandle } from '../src/driver.js';
 import type { MobileWorkerConfig } from '../src/config.js';
 import type { MobileAssignment } from '../src/types.js';
 
@@ -66,12 +67,60 @@ afterEach(async () => {
   }
 });
 
-async function boot(cfg: MobileWorkerConfig): Promise<string> {
-  const server = createMobileWorkerServer(cfg);
+async function boot(cfg: MobileWorkerConfig, driver?: IMobileDriver): Promise<string> {
+  const server = createMobileWorkerServer(
+    cfg,
+    driver ? { createDriver: () => driver } : undefined,
+  );
   port += 1;
   await server.listen(port);
   servers.push(() => server.close());
   return `http://localhost:${port}`;
+}
+
+/** Deterministic fake driver: scripted session behavior, no Appium server. */
+function fakeDriver(options?: {
+  failCreate?: unknown;
+  deleteCalls?: string[];
+  neverResolve?: boolean;
+}): IMobileDriver {
+  const sessions = new Set<string>();
+  let counter = 0;
+  return {
+    async createSession(): Promise<SessionHandle> {
+      if (options?.neverResolve) {
+        await new Promise(() => undefined);
+      }
+      if (options?.failCreate !== undefined) throw options.failCreate;
+      counter += 1;
+      const sessionId = `fake-session-${counter}`;
+      sessions.add(sessionId);
+      return { sessionId };
+    },
+    async deleteSession(sessionId: string): Promise<void> {
+      options?.deleteCalls?.push(sessionId);
+      sessions.delete(sessionId);
+    },
+    hasSession: (sessionId: string) => sessions.has(sessionId),
+  };
+}
+
+async function waitForSession(
+  base: string,
+  id: string,
+): Promise<{ status: string; appiumSessionId: string | null }> {
+  for (let i = 0; i < 50; i += 1) {
+    const response = await fetch(`${base}/v1/assignments/${id}`, {
+      headers: authHeaders('test-token'),
+    });
+    const body = (await response.json()) as {
+      status: string;
+      appiumSessionId?: string | null;
+    };
+    if (body.appiumSessionId) return body as never;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('Timed out waiting for session establishment.');
 }
 
 function authHeaders(token: string): Record<string, string> {
@@ -154,19 +203,51 @@ describe('mobile worker assignment API', () => {
     expect(response.status).toBe(400);
   });
 
-  it('accepts a valid envelope and reports deferred error, never success', async () => {
-    const base = await boot(config());
+  it('establishes a session and holds it without executing steps', async () => {
+    const base = await boot(config(), fakeDriver());
     const response = await fetch(`${base}/v1/assignments`, {
       method: 'POST',
       headers: authHeaders('test-token'),
       body: JSON.stringify(assignment()),
     });
     expect(response.status).toBe(202);
-    const { result } = await waitForResult(base, 'a1');
+    const progress = await waitForSession(base, 'a1');
+    expect(progress.status).toBe('running');
+    expect(progress.appiumSessionId).toBe('fake-session-1');
+  });
+
+  it('maps session creation failure to a deterministic error', async () => {
+    const base = await boot(
+      config(),
+      fakeDriver({ failCreate: { kind: 'environment', message: 'Device unavailable: emulator offline' } }),
+    );
+    const response = await fetch(`${base}/v1/assignments`, {
+      method: 'POST',
+      headers: authHeaders('test-token'),
+      body: JSON.stringify(assignment({ assignmentId: 'fail-1' })),
+    });
+    expect(response.status).toBe(202);
+    const { result } = await waitForResult(base, 'fail-1');
     expect(result.status).toBe('error');
-    expect(result.classification).toBe('automation');
-    expect(result.errorType).toBe('NotImplemented');
+    expect(result.classification).toBe('environment');
     expect(result.status).not.toBe('passed');
+  });
+
+  it('deletes the session on cancel', async () => {
+    const deleteCalls: string[] = [];
+    const base = await boot(config(), fakeDriver({ deleteCalls }));
+    const headers = authHeaders('test-token');
+    await fetch(`${base}/v1/assignments`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(assignment({ assignmentId: 'cancel-1' })),
+    });
+    await waitForSession(base, 'cancel-1');
+    const response = await fetch(`${base}/v1/assignments/cancel-1`, { method: 'DELETE', headers });
+    expect(response.status).toBe(200);
+    const { result } = await waitForResult(base, 'cancel-1');
+    expect(result.status).toBe('cancelled');
+    expect(deleteCalls).toEqual(['fake-session-1']);
   });
 
   it('returns existing progress for duplicate submissions', async () => {
@@ -187,7 +268,7 @@ describe('mobile worker assignment API', () => {
   });
 
   it('aborts via DELETE and reports cancellation', async () => {
-    const base = await boot(config());
+    const base = await boot(config(), fakeDriver());
     const headers = authHeaders('test-token');
     await fetch(`${base}/v1/assignments`, {
       method: 'POST',

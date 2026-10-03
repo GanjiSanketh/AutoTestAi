@@ -88,7 +88,8 @@ public sealed record MobileAssignmentProgressDto(
     int? CurrentStepOrder,
     IReadOnlyList<MobileStepResultDto> StepResults,
     IReadOnlyList<MobileLogDto> Logs,
-    MobileAssignmentResultDto? Result);
+    MobileAssignmentResultDto? Result,
+    string? AppiumSessionId);
 
 /// <summary>
 /// Boundary to the isolated Appium worker over HTTP (Slice 3C).

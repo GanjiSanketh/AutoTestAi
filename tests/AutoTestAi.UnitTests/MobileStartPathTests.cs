@@ -111,6 +111,10 @@ public sealed class MobileStartPathTests
         public Task AddSlotAsync(MobileDeviceSlot s, CancellationToken ct) => throw new NotImplementedException();
         public Task<IReadOnlyList<MobileApp>> ListAppsAsync(Guid p, CancellationToken ct) => throw new NotImplementedException();
         public Task AddAppAsync(MobileApp a, CancellationToken ct) => throw new NotImplementedException();
+        public Task<MobileDeviceSession?> GetSessionByIdAsync(Guid id, CancellationToken ct) => throw new NotImplementedException();
+        public Task<MobileDeviceSession?> FindSessionByAssignmentAsync(Guid id, CancellationToken ct) => throw new NotImplementedException();
+        public Task<IReadOnlyList<MobileDeviceSession>> ListStaleSessionsAsync(DateTimeOffset s, int take, CancellationToken ct) => throw new NotImplementedException();
+        public Task AddSessionAsync(MobileDeviceSession session, CancellationToken ct) => throw new NotImplementedException();
         public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
     }
 

@@ -97,6 +97,24 @@ public sealed class EfMobileRegistryStore : IMobileRegistryStore
     public async Task AddAppAsync(MobileApp app, CancellationToken ct)
         => await _db.MobileApps.AddAsync(app, ct);
 
+    public Task<MobileDeviceSession?> GetSessionByIdAsync(Guid sessionId, CancellationToken ct)
+        => _db.MobileDeviceSessions.FirstOrDefaultAsync(s => s.Id == sessionId, ct);
+
+    public Task<MobileDeviceSession?> FindSessionByAssignmentAsync(Guid assignmentId, CancellationToken ct)
+        => _db.MobileDeviceSessions.FirstOrDefaultAsync(s => s.AssignmentId == assignmentId, ct);
+
+    public async Task<IReadOnlyList<MobileDeviceSession>> ListStaleSessionsAsync(DateTimeOffset staleBefore, int take, CancellationToken ct)
+        => await _db.MobileDeviceSessions.AsNoTracking()
+            .Where(s => s.Status != Domain.Enums.MobileSessionStatus.Closed &&
+                        s.Status != Domain.Enums.MobileSessionStatus.Orphaned &&
+                        s.LastHeartbeatAt != null && s.LastHeartbeatAt <= staleBefore)
+            .OrderBy(s => s.LastHeartbeatAt)
+            .Take(take)
+            .ToListAsync(ct);
+
+    public async Task AddSessionAsync(MobileDeviceSession session, CancellationToken ct)
+        => await _db.MobileDeviceSessions.AddAsync(session, ct);
+
     public Task SaveChangesAsync(CancellationToken ct)
         => _db.SaveChangesAsync(ct);
 }

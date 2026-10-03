@@ -600,3 +600,32 @@ hideKeyboard/wait/screenshot/terminateApp) and `accessibilityId=`/
 `resourceId=` locators are validated, never executed, in this checkpoint.
 Actual Appium session creation, step execution, screenshots, page source,
 logs, dispatch, and iOS runtime remain FUTURE (ADR-008).
+
+## 18.1. Mobile Session Lifecycle (Phase 3 Slice 3C-4B-1)
+
+The Appium worker creates real sessions behind a narrow `IMobileDriver`
+boundary (`createSession`/`deleteSession`/`hasSession` only; no
+`executeScript`, no arbitrary commands, no capability mutation). Trusted
+server-built capabilities translate 1:1 to WebdriverIO `appium:*` options;
+transport (`hostname`/`port`/`path`) derives exclusively from worker-local
+`APPIUM_SERVER_URL`, never from the assignment. After creation the worker
+holds a controlled "session established" state until cancellation, timeout,
+or shutdown: steps are validated but never executed, and success is never
+reported for work not performed. `DELETE /v1/assignments/:id` aborts pending
+creation, deletes the Appium session, and reports cancellation; timeouts reuse
+`WorkerTimeoutsDto`/`MobileOptions.NewCommandTimeoutSeconds` plus execution
+semantics. Install/Reinstall binaries download from the server-minted https
+URL to worker-controlled temp files with guaranteed cleanup (Preinstalled
+skips download); URLs, tokens, and session ids are never logged.
+
+The control plane owns `MobileDeviceSession` rows via `IMobileSessionService`
+(`Creating → Active → Closed`, or `→ Orphaned` when the slot no longer proves
+ownership). Every mutation is fenced on project scope, session→assignment
+binding, an active `GridAssignment` with matching `AssignmentToken`, and
+current slot ownership; stale callers get deterministic conflicts and can
+never activate/update/close/orphan a newer session. Heartbeat rides the
+existing assignment-renewal seam (`GridScheduler.RenewLeaseAsync` piggyback,
+no new public endpoint); cleanup is idempotent and ownership-scoped. No
+schema changes were required. Mobile action execution, screenshots, page
+source, Appium logs, self-healing, visual regression, video, and iOS runtime
+remain FUTURE.

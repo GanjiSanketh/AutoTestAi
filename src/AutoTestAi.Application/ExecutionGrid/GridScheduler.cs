@@ -233,6 +233,10 @@ public sealed class GridScheduler : IGridScheduler
         // Mobile piggyback: extend the linked slot lease in the same
         // transaction when present. Never fails assignment renewal.
         await TryExtendLinkedSlotAsync(assignment, now, ct);
+        // Mobile piggyback (Slice 3C-4B-1): session heartbeat rides the
+        // existing renewal seam. No new public endpoint; ownership is
+        // implicit (scheduler-owned renewal for the active assignment).
+        await TryTouchLinkedSessionAsync(assignment, now, ct);
         try
         {
             await _assignments.SaveChangesAsync(ct);
@@ -418,6 +422,30 @@ public sealed class GridScheduler : IGridScheduler
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Linked slot expiry staging failed for assignment {AssignmentId}.",
+                assignment.Id);
+        }
+    }
+
+    /// <summary>
+    /// Mobile session heartbeat piggyback (Slice 3C-4B-1). Updates
+    /// LastHeartbeatAt for the runtime session bound to the renewed
+    /// assignment. Best-effort and staged in the same transaction; never
+    /// fails renewal and never touches closed/orphaned rows.
+    /// </summary>
+    private async Task TryTouchLinkedSessionAsync(GridAssignment assignment, DateTimeOffset now, CancellationToken ct)
+    {
+        try
+        {
+            var session = await _mobile.FindSessionByAssignmentAsync(assignment.Id, ct);
+            if (session is null ||
+                session.Status is MobileSessionStatus.Closed or MobileSessionStatus.Orphaned)
+                return;
+            session.LastHeartbeatAt = now;
+            session.UpdatedAt = now;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Linked session heartbeat staging failed for assignment {AssignmentId}.",
                 assignment.Id);
         }
     }
