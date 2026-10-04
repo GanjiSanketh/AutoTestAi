@@ -58,6 +58,7 @@ public static class DependencyInjection
         services.AddScoped<Mobile.IMobileAppService, Mobile.MobileAppService>();
         services.AddScoped<Mobile.IMobileSessionService, Mobile.MobileSessionService>();
         services.AddScoped<Mobile.IVisualBaselineService, Mobile.VisualBaselineService>();
+        services.AddScoped<Visual.IVisualComparisonService, Visual.VisualComparisonService>();
         services.AddScoped<Mobile.MobileCapabilityBuilder>();
         services.AddSingleton<Webhooks.WebhookQueue>();
         services.AddSingleton<Webhooks.WebhookRateLimiter>();

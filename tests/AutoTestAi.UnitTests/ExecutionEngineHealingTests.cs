@@ -104,6 +104,8 @@ public sealed class ExecutionEngineHealingTests
         public Task UploadAsync(string key, Stream content, string contentType, CancellationToken ct) => Task.CompletedTask;
         public Task<string> GetPresignedDownloadUrlAsync(string key, int expirySeconds, CancellationToken ct) => Task.FromResult(string.Empty);
         public Task<bool> CheckConnectivityAsync(CancellationToken ct) => Task.FromResult(true);
+        public Task<byte[]> DownloadAsync(string key, int maxBytes, CancellationToken ct)
+            => throw new NotFoundException("Stored object not found.");
     }
 
     private sealed class FakeAudit : IAuditService

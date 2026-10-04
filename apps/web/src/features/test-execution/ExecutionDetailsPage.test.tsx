@@ -245,6 +245,51 @@ describe('ExecutionDetailsPage', () => {
     expect(await screen.findByText(/expired or been removed/)).toBeTruthy();
   });
 
+  it('previews image artifacts inline without affecting other types', async () => {
+    mockedArtifacts.mockResolvedValue([
+      {
+        id: 'shot-1',
+        artifactType: 'screenshot',
+        fileName: 'step-1-failure.png',
+        stepOrder: 1,
+        contentType: 'image/png',
+        sizeBytes: 42,
+        createdAt: '2026-09-28T10:00:03Z',
+      },
+      {
+        id: 'diff-1',
+        artifactType: 'visual-diff',
+        fileName: 'step-3-visual-diff.png',
+        stepOrder: 3,
+        contentType: 'image/png',
+        sizeBytes: 43,
+        createdAt: '2026-09-28T10:00:04Z',
+      },
+      {
+        id: 'log-1',
+        artifactType: 'appium-log',
+        fileName: 'appium.log',
+        stepOrder: null,
+        contentType: 'text/plain',
+        sizeBytes: 44,
+        createdAt: '2026-09-28T10:00:05Z',
+      },
+    ]);
+    mockedDownload.mockResolvedValue({ downloadUrl: 'https://artifacts.example/preview.png?exp=900' });
+    renderPage();
+    await screen.findByText('step-3-visual-diff.png');
+
+    // Image artifacts (screenshot and visual-diff) offer preview; text does not.
+    const previewButtons = screen.getAllByRole('button', { name: 'Preview' });
+    expect(previewButtons).toHaveLength(2);
+
+    fireEvent.click(previewButtons[1]);
+    await waitFor(() => expect(mockedDownload).toHaveBeenCalledWith('p1', 'e1', 'diff-1'));
+    const images = await screen.findAllByAltText('step-3-visual-diff.png');
+    expect(images.length).toBeGreaterThan(0);
+    expect(document.body.textContent ?? '').not.toContain('https://artifacts.example/preview.png?exp=900');
+  });
+
   it('maps forbidden and missing executions to safe states', async () => {
     mockedGet.mockRejectedValue(new ApiError(403, 'FORBIDDEN', 'Forbidden'));
     renderPage();

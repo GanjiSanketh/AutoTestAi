@@ -738,3 +738,33 @@ execution, no pixel diff, no verdict logic, no `visual-diff` artifacts
 dependency). Pixel-embedded secrets cannot be scrubbed by text redaction;
 access control plus guidance against baselining secret-bearing screens is
 the control. Video, iOS, and Playwright comparison remain FUTURE.
+
+## 18.5. Deterministic Visual Comparison (Phase 3 Slice 3C-4D-2)
+
+Server-side comparison of `verifyScreenshot` checkpoints against approved
+baselines, inside fenced terminal persistence:
+
+- Only otherwise-`Passed` outcomes carrying `verifyScreenshot` step
+evidence are evaluated; unrelated failures are never rewritten and no
+baseline lookup occurs without checkpoints.
+- `IArtifactStorage.DownloadAsync` (bounded server-side read) feeds
+baseline bytes; the Appium worker stays thin (capture-only, no
+comparison, no storage access, no verdict logic).
+- Pure `RgbaPixelComparer` (`v1-rgba-bps`, SixLabors.ImageSharp v3,
+server-side only): canonical RGBA decode (compression/metadata
+indifference), alpha flattened against black, per-pixel max-channel
+tolerance 16/255, integer basis-point rate
+`differing * 10000 / total`, single O(N) pass. Dimension mismatch is a
+deterministic mismatch (worst-case rate, diagnostic diff).
+- Threshold: per-baseline `MismatchThresholdBps` else default 10 bps
+(0.1%); equality passes. Bounds: 8 MB baseline / 4 MB actual encoded,
+4096 px and ~16.7M pixel decode caps; violations are warning-only
+comparison errors, never mismatches.
+- Mismatch verdict is ordinary `Failed`/`TestFailure` (`VisualMismatch`
+error type) with a `step-{order}-visual-diff.png` difference-highlight
+artifact; matches, skips, and errors leave the verdict untouched and
+create nothing. Comparison never consumes `MaxAttempts`, creates no
+assignments, and honors cancellation. Metrics flow through the error
+message and `visual.compared` audit (identifier-only); no migration.
+- No AI triage, no masked regions, no auto-refresh/replacement, no
+Playwright/iOS/video comparison.

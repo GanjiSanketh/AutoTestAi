@@ -123,6 +123,8 @@ public sealed class ExecutionEngineTests
         public Task<string> GetPresignedDownloadUrlAsync(string key, int expirySeconds, CancellationToken ct)
             => Task.FromResult($"https://artifacts.example/{key}");
         public Task<bool> CheckConnectivityAsync(CancellationToken ct) => Task.FromResult(true);
+        public Task<byte[]> DownloadAsync(string key, int maxBytes, CancellationToken ct)
+            => throw new NotFoundException("Stored object not found.");
     }
 
     private sealed class FakeAudit : IAuditService

@@ -81,6 +81,7 @@ public sealed class ExecutionEngine : IExecutionEngine
     private readonly IExecutionVariablesStore? _envelopes;
     private readonly IMobileExecutionCoordinator? _mobile;
     private readonly Mobile.IMobileSessionService? _mobileSessions;
+    private readonly Visual.IVisualComparisonService? _visual;
     private readonly ILogger<ExecutionEngine> _logger;
 
     public ExecutionEngine(
@@ -100,7 +101,8 @@ public sealed class ExecutionEngine : IExecutionEngine
         IVariableResolutionService? varResolver = null,
         IExecutionVariablesStore? envelopes = null,
         IMobileExecutionCoordinator? mobileCoordinator = null,
-        Mobile.IMobileSessionService? mobileSessions = null)
+        Mobile.IMobileSessionService? mobileSessions = null,
+        Visual.IVisualComparisonService? visualComparison = null)
     {
         _store = store;
         _cases = cases;
@@ -118,6 +120,7 @@ public sealed class ExecutionEngine : IExecutionEngine
         _envelopes = envelopes;
         _mobile = mobileCoordinator;
         _mobileSessions = mobileSessions;
+        _visual = visualComparison;
         _logger = logger;
     }
 
@@ -430,6 +433,13 @@ public sealed class ExecutionEngine : IExecutionEngine
         // Slice 3C-4B-3: mobile failure evidence through the same fenced,
         // best-effort artifact path. No new tables, endpoints, or storage.
         await PersistMobileEvidenceAsync(execution, test, outcome, ct);
+
+        // Slice 3C-4D-2: deterministic visual comparison. Only an
+        // otherwise-Passed outcome with verifyScreenshot evidence is
+        // evaluated; unrelated failures are never rewritten. A mismatch
+        // overrides the outcome below through the normal terminal path.
+        if (outcome.Status == ExecutionTestStatus.Passed)
+            outcome = await ApplyVisualComparisonAsync(execution, test, outcome, ct);
 
         // Slice 11: persist worker-reported healing outcomes (fenced). Healing
         // never mutates the bound test version; history keeps original targets.
@@ -996,10 +1006,139 @@ public sealed class ExecutionEngine : IExecutionEngine
         }
     }
 
+    /// <summary>
+    /// Slice 3C-4D-2: deterministic visual comparison for verifyScreenshot
+    /// checkpoints. Runs inside the fenced idempotent persist path, after
+    /// evidence is stored and before terminal finalization. Only
+    /// otherwise-Passed outcomes with verifyScreenshot step evidence are
+    /// evaluated; every skip/error path leaves the outcome untouched, and a
+    /// mismatch overrides it to Failed/TestFailure through the normal
+    /// terminal flow below (defects, tickets, events, lease release).
+    /// </summary>
+    private async Task<WorkerExecutionOutcome> ApplyVisualComparisonAsync(
+        Execution execution, ExecutionTest test, WorkerExecutionOutcome outcome, CancellationToken ct)
+    {
+        if (_visual is null)
+            return outcome;
+        var checkpoints = outcome.Steps
+            .Where(s => string.Equals(s.Action, "verifyScreenshot", StringComparison.OrdinalIgnoreCase))
+            .Select(s => s.Order)
+            .Distinct()
+            .ToList();
+        if (checkpoints.Count == 0 || test.TestCaseVersionId is null)
+            return outcome; // comparison service not consulted without checkpoints
+
+        string? firstMismatch = null;
+        foreach (var order in checkpoints)
+        {
+            ct.ThrowIfCancellationRequested();
+            var shot = outcome.Screenshots.FirstOrDefault(s => s.StepOrder == order);
+            if (shot is null)
+            {
+                _logger.LogWarning("Visual comparison skipped for execution {ExecutionId} step {StepOrder}: no checkpoint screenshot.",
+                    execution.Id, order);
+                continue;
+            }
+            byte[] actual;
+            try
+            {
+                actual = Convert.FromBase64String(shot.Base64Content);
+            }
+            catch (FormatException ex)
+            {
+                _logger.LogWarning(ex, "Visual comparison skipped for execution {ExecutionId} step {StepOrder}: checkpoint image undecodable.",
+                    execution.Id, order);
+                continue;
+            }
+            var compared = await _visual.CompareCheckpointAsync(
+                execution.ProjectId, test.TestCaseVersionId.Value, order, actual, ct);
+            if (compared is null)
+                continue; // skipped/error: verdict unchanged, warning already logged
+            await _audit.RecordAsync("visual.compared", "execution",
+                execution.Id.ToString(), execution.ProjectId, SafeVisualMeta(execution, test, compared, order), ct);
+            if (!compared.IsMismatch)
+                continue;
+            await PersistVisualDiffAsync(execution, test, order, compared, ct);
+            firstMismatch ??= compared.DimensionMismatch
+                ? $"Visual mismatch at step {order}: dimensions {compared.ActualWidth}x{compared.ActualHeight} vs baseline {compared.BaselineWidth}x{compared.BaselineHeight} (baseline {ShortSha(compared.BaselineSha256)})."
+                : $"Visual mismatch at step {order}: {compared.MismatchRateBps} bps exceeds {compared.ThresholdBps} bps threshold (baseline {ShortSha(compared.BaselineSha256)}).";
+        }
+        if (firstMismatch is null)
+            return outcome;
+        return outcome with
+        {
+            Status = ExecutionTestStatus.Failed,
+            Classification = FailureClassification.TestFailure,
+            ErrorType = "VisualMismatch",
+            ErrorMessage = Truncate(firstMismatch),
+        };
+    }
+
+    private async Task PersistVisualDiffAsync(
+        Execution execution, ExecutionTest test, int stepOrder,
+        Visual.VisualComparisonOutcome compared, CancellationToken ct)
+    {
+        if (compared.DiffPng is null || compared.DiffPng.Length == 0)
+        {
+            _logger.LogWarning("Visual diff omitted for execution {ExecutionId} step {StepOrder}: no diff bytes.",
+                execution.Id, stepOrder);
+            return;
+        }
+        try
+        {
+            // The diff is evidence, not the verdict: upload failures preserve
+            // the authoritative mismatch and never fail persistence (§60.7).
+            var slug = Slug($"step-{stepOrder}-visual-diff.png");
+            var key = $"projects/{execution.ProjectId}/executions/{execution.Id}/tests/{test.Id}/step-{stepOrder:000}-{slug}";
+            using var stream = new MemoryStream(compared.DiffPng, writable: false);
+            await _artifacts.UploadAsync(key, stream, "image/png", ct);
+            await _store.AddArtifactAsync(new ExecutionArtifact
+            {
+                ExecutionTestId = test.Id,
+                ArtifactType = "visual-diff",
+                StorageKey = key,
+                FileName = $"step-{stepOrder}-visual-diff.png",
+                StepOrder = stepOrder,
+                ContentType = "image/png",
+                SizeBytes = compared.DiffPng.Length,
+                CreatedAt = _clock.UtcNow,
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Visual diff upload failed for execution {ExecutionId}.", execution.Id);
+        }
+    }
+
+    private static string ShortSha(string sha256)
+        => string.IsNullOrEmpty(sha256) ? "unknown"
+            : sha256.Length <= 8 ? sha256 : sha256[..8];
+
+    private static string SafeVisualMeta(
+        Execution execution, ExecutionTest test, Visual.VisualComparisonOutcome compared, int stepOrder)
+        => SensitiveDataRedactor.Redact(JsonSerializer.Serialize(new
+        {
+            executionId = execution.Id,
+            testId = test.Id,
+            testVersionId = test.TestCaseVersionId,
+            stepOrder,
+            baselineId = compared.BaselineId,
+            baselineSha256 = ShortSha(compared.BaselineSha256),
+            mismatchRateBps = compared.MismatchRateBps,
+            thresholdBps = compared.ThresholdBps,
+            baselineWidth = compared.BaselineWidth,
+            baselineHeight = compared.BaselineHeight,
+            actualWidth = compared.ActualWidth,
+            actualHeight = compared.ActualHeight,
+            dimensionMismatch = compared.DimensionMismatch,
+            verdict = compared.IsMismatch ? "mismatch" : "match",
+            algorithmVersion = compared.AlgorithmVersion,
+            durationMs = compared.DurationMs,
+        }));
+
     private async Task PublishStatusAsync(Execution execution, CancellationToken ct)
         => await _events.PublishAsync(execution.Id, ExecutionEvents.ExecutionStatusChanged,
             new { executionId = execution.Id, status = execution.Status.ToString() }, ct);
-
     /// <summary>
     /// Slice 11: records healing outcomes under the same fencing as the result
     /// itself. A stale worker's report is rejected (logged, never fatal to the

@@ -131,6 +131,18 @@ export function ExecutionDetailsPage() {
     },
   });
 
+  // Slice 3C-4D-2: inline preview for image artifacts (screenshots,
+  // visual diffs). URLs are fetched on demand per artifact and never
+  // logged or persisted by this UI.
+  const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
+  const preview = useMutation({
+    mutationFn: (artifactId: string) =>
+      executionEndpoints.download(projectId, executionId, artifactId),
+    onSuccess: (data, artifactId) => {
+      setPreviewUrls((prev) => ({ ...prev, [artifactId]: data.downloadUrl }));
+    },
+  });
+
   const isTerminal = detail.data ? TERMINAL.has(detail.data.status) : false;
 
   // Seed live buffers from REST state; reset when switching executions.
@@ -428,32 +440,57 @@ export function ExecutionDetailsPage() {
               )}
               {artifacts.data && artifacts.data.length > 0 && (
                 <ul className="space-y-2 text-sm">
-                  {artifacts.data.map((artifact) => (
-                    <li
-                      key={artifact.id}
-                      className="flex items-center justify-between gap-2 rounded-md border border-slate-200 px-3 py-2"
-                    >
-                      <span>
-                        <span className="font-medium text-slate-900">
-                          {artifact.fileName ?? artifact.artifactType}
-                        </span>
-                        {artifact.stepOrder !== null && artifact.stepOrder !== undefined && (
-                          <span className="ml-2 font-mono text-xs text-slate-400">
-                            step {artifact.stepOrder}
-                          </span>
-                        )}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={download.isPending}
-                        onClick={() => download.mutate(artifact.id)}
+                  {artifacts.data.map((artifact) => {
+                    const isImage = (artifact.contentType ?? '').toLowerCase().startsWith('image/');
+                    const previewUrl = previewUrls[artifact.id];
+                    return (
+                      <li
+                        key={artifact.id}
+                        className="rounded-md border border-slate-200 px-3 py-2"
                       >
-                        Open
-                        <ExternalLink className="h-3 w-3" aria-hidden />
-                      </Button>
-                    </li>
-                  ))}
+                        <div className="flex items-center justify-between gap-2">
+                          <span>
+                            <span className="font-medium text-slate-900">
+                              {artifact.fileName ?? artifact.artifactType}
+                            </span>
+                            {artifact.stepOrder !== null && artifact.stepOrder !== undefined && (
+                              <span className="ml-2 font-mono text-xs text-slate-400">
+                                step {artifact.stepOrder}
+                              </span>
+                            )}
+                          </span>
+                          <span className="flex gap-2">
+                            {isImage && !previewUrl && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                disabled={preview.isPending}
+                                onClick={() => preview.mutate(artifact.id)}
+                              >
+                                Preview
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={download.isPending}
+                              onClick={() => download.mutate(artifact.id)}
+                            >
+                              Open
+                              <ExternalLink className="h-3 w-3" aria-hidden />
+                            </Button>
+                          </span>
+                        </div>
+                        {isImage && previewUrl && (
+                          <img
+                            src={previewUrl}
+                            alt={artifact.fileName ?? artifact.artifactType}
+                            className="mt-2 max-h-96 rounded border"
+                          />
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
               {download.error && (

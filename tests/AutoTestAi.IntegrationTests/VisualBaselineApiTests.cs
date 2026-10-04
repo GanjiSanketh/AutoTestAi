@@ -50,6 +50,8 @@ public sealed class VisualBaselineApiTests : IClassFixture<Slice1ApiFactory>
         public Task<string> GetPresignedDownloadUrlAsync(string key, int expirySeconds, CancellationToken ct)
             => Task.FromResult($"https://artifacts.example/{key}?exp={expirySeconds}");
         public Task<bool> CheckConnectivityAsync(CancellationToken ct) => Task.FromResult(true);
+        public Task<byte[]> DownloadAsync(string key, int maxBytes, CancellationToken ct)
+            => throw new AutoTestAi.Application.Common.NotFoundException("Stored object not found.");
     }
 
     private static HttpClient ClientWithStorage(Slice1ApiFactory factory, string sub, string[] roles)

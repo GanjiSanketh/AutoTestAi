@@ -208,6 +208,8 @@ public sealed class MobileExecutionCoordinatorTests
         public Task<string> GetPresignedDownloadUrlAsync(string key, int expirySeconds, CancellationToken ct)
             => Task.FromResult(PresignedUrl);
         public Task<bool> CheckConnectivityAsync(CancellationToken ct) => Task.FromResult(true);
+        public Task<byte[]> DownloadAsync(string key, int maxBytes, CancellationToken ct)
+            => throw new NotFoundException("Stored object not found.");
     }
 
     private sealed class FakeEnvelopes : IExecutionVariablesStore
