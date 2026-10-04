@@ -77,6 +77,8 @@ public sealed class ExecutionEngine : IExecutionEngine
     private readonly ISelfHealingService? _healing;
     private readonly IVariableResolutionService? _varResolver;
     private readonly IExecutionVariablesStore? _envelopes;
+    private readonly IMobileExecutionCoordinator? _mobile;
+    private readonly Mobile.IMobileSessionService? _mobileSessions;
     private readonly ILogger<ExecutionEngine> _logger;
 
     public ExecutionEngine(
@@ -94,7 +96,9 @@ public sealed class ExecutionEngine : IExecutionEngine
         ISelfHealingPolicyStore? healingPolicies = null,
         ISelfHealingService? healing = null,
         IVariableResolutionService? varResolver = null,
-        IExecutionVariablesStore? envelopes = null)
+        IExecutionVariablesStore? envelopes = null,
+        IMobileExecutionCoordinator? mobileCoordinator = null,
+        Mobile.IMobileSessionService? mobileSessions = null)
     {
         _store = store;
         _cases = cases;
@@ -110,6 +114,8 @@ public sealed class ExecutionEngine : IExecutionEngine
         _healing = healing;
         _varResolver = varResolver;
         _envelopes = envelopes;
+        _mobile = mobileCoordinator;
+        _mobileSessions = mobileSessions;
         _logger = logger;
     }
 
@@ -181,6 +187,20 @@ public sealed class ExecutionEngine : IExecutionEngine
             return OutcomeFromPersisted(test, test.Attempt);
         if (test.Status != ExecutionTestStatus.Running)
             throw new InvalidOperationException($"Execution test {test.Id} is {test.Status}, not Running.");
+
+        // Slice 3C-4B-2: explicit framework branch. Playwright flows below
+        // are byte-identical; appium executions run the mobile coordinator.
+        if (string.Equals(test.Framework, "appium", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_mobile is null)
+                return new WorkerExecutionOutcome(
+                    ExecutionTestStatus.Error, FailureClassification.AutomationFailure,
+                    nameof(WorkerInfrastructureException), "Mobile execution is not configured.",
+                    0,
+                    Array.Empty<WorkerStepResultDto>(), Array.Empty<WorkerLogDto>(),
+                    Array.Empty<WorkerScreenshotDto>(), test.Attempt);
+            return await _mobile.RunMobileAsync(executionId, heartbeatAsync, ct);
+        }
 
         WorkerInfrastructureException? lastInfraError = null;
         var total = Stopwatch.StartNew();
@@ -367,6 +387,11 @@ public sealed class ExecutionEngine : IExecutionEngine
             }
         }
 
+        // Slice 3C-4B-2: best-effort mobile session close while the lease is
+        // still active (fenced; stale closes are swallowed). Web executions
+        // and already-closed sessions are no-ops.
+        await CloseMobileSessionAsync(execution, test, ct);
+
         var now = _clock.UtcNow;
         // Slice 3A: re-resolve secret values in this activity scope for
         // exact-match masking of worker-echoed text. Best-effort: persist must
@@ -495,6 +520,11 @@ public sealed class ExecutionEngine : IExecutionEngine
             }
         }
 
+        // Slice 3C-4B-2: best-effort mobile session close on terminal paths
+        // (timeout/cancel/error where the coordinator never ran or was
+        // interrupted). Fenced and swallowed; never fails finalization.
+        await CloseMobileSessionAsync(execution, test, ct);
+
         var now = _clock.UtcNow;
         if (ExecutionTransitions.IsValidTestTransition(test.Status, testStatus))
         {
@@ -580,6 +610,34 @@ public sealed class ExecutionEngine : IExecutionEngine
         await _store.DeleteLogsAsync(testId, ct);
         await _store.DeleteArtifactsAsync(testId, ct);
         await _store.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Slice 3C-4B-2: best-effort close of the runtime session bound to the
+    /// test's current assignment. No-op for web executions, unconfigured
+    /// sessions, or missing bindings. Fenced inside the session service;
+    /// every failure is swallowed so terminal persistence always wins and a
+    /// stale path can never disturb a newer session (the reaper converges).
+    /// </summary>
+    private async Task CloseMobileSessionAsync(
+        Execution execution, ExecutionTest test, CancellationToken ct)
+    {
+        if (_mobileSessions is null)
+            return;
+        if (!string.Equals(test.Framework, "appium", StringComparison.OrdinalIgnoreCase))
+            return;
+        if (test.AssignmentId is null || test.AssignmentToken is null)
+            return;
+        try
+        {
+            await _mobileSessions.CloseForAssignmentAsync(
+                execution.ProjectId, test.AssignmentId.Value, test.AssignmentToken.Value, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(ex, "Mobile session close skipped for execution {ExecutionId}.",
+                execution.Id);
+        }
     }
 
     private async Task<WorkerAssignmentDto> BuildAssignmentAsync(

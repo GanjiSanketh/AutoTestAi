@@ -132,8 +132,11 @@ public sealed class GridScheduler : IGridScheduler
         var test = (await _executions.ListTestsByExecutionAsync(execution.Id, ct))
             .OrderBy(t => t.CreatedAt).FirstOrDefault()
             ?? throw new NotFoundException("Execution test not found.");
-        if (test.Status != ExecutionTestStatus.Queued)
-            throw new ConflictException($"Execution test is {test.Status}, not Queued.");
+        // Slice 3C-4B-2: dispatch runs post-Prepare, so Running is a valid
+        // pre-dispatch state alongside Queued. Terminal states still fail
+        // closed. The web claim path is untouched.
+        if (test.Status != ExecutionTestStatus.Queued && test.Status != ExecutionTestStatus.Running)
+            throw new ConflictException($"Execution test is {test.Status}, not ready for mobile dispatch.");
         if (!string.Equals(test.Framework, MobileFramework, StringComparison.OrdinalIgnoreCase))
             throw new ConflictException("Execution test framework is not mobile (appium).");
 

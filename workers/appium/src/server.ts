@@ -1,18 +1,18 @@
 /**
- * Mobile execution HTTP plane (Slice 3C-4A scaffold).
+ * Mobile execution HTTP plane (Slices 3C-4A through 3C-4B-2).
  *
  *   POST   /v1/assignments        submit an assignment (202 + background run)
  *   GET    /v1/assignments/:id    poll progress (steps, logs, terminal result)
- *   DELETE /v1/assignments/:id    best-effort abort
+ *   DELETE /v1/assignments/:id    abort: cancel actions, delete Appium session
  *   GET    /health                orchestrator probe (no auth)
  *
  * Authentication: Bearer WORKER_API_TOKEN (timing-safe compare). The token is
  * server-side configuration shared with the API only — never browsers.
  *
- * Slice 3C-4A explicitly defers Appium driver creation: accepted assignments
- * validate the envelope, then complete immediately with a controlled
- * error/automation deferred result. This worker never reports success for
- * work it did not perform. No shell, no eval, no dynamic code loading.
+ * Slice 3C-4B-2 runs the closed mobile action set against a real Appium
+ * session (Android-first) and returns passed/failed/error/cancelled/timedOut
+ * results with screenshots. Steps are validated at the boundary; unsupported
+ * actions never execute. No shell, no eval, no dynamic code loading.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
@@ -24,6 +24,7 @@ import {
   type IMobileDriver,
 } from './driver.js';
 import { isHttpAppUrl, stageAppBinary, type StagedAppBinary } from './appBinary.js';
+import { runMobileActions } from './actions.js';
 import { redactStepValue } from './redaction.js';
 import { validateMobileSteps } from './steps.js';
 import type {
@@ -32,6 +33,7 @@ import type {
   MobileAssignmentStatus,
   MobileLog,
   MobileResult,
+  MobileScreenshot,
   MobileStepResult,
 } from './types.js';
 
@@ -164,6 +166,7 @@ export function createMobileWorkerServer(
     );
     let sessionId: string | null = null;
     let stagedApp: StagedAppBinary | null = null;
+    let screenshots: MobileScreenshot[] = [];
     const finish = (
       status: MobileResult['status'],
       classification: MobileResult['classification'],
@@ -179,7 +182,7 @@ export function createMobileWorkerServer(
         durationMs: Date.now() - startedAt,
         stepResults: record.stepResults,
         logs: record.logs,
-        screenshots: [],
+        screenshots,
         appiumSessionId: sessionId,
       };
     };
@@ -189,9 +192,11 @@ export function createMobileWorkerServer(
         stagedApp = null;
         await staged.cleanup();
       }
+      // NOTE: local sessionId is intentionally preserved for the terminal
+      // result (control-plane binding); driver.deleteSession is idempotent
+      // and record.appiumSessionId=null keeps shutdown cleanup accurate.
       if (sessionId === null) return;
       const closing = sessionId;
-      sessionId = null;
       record.appiumSessionId = null;
       try {
         await driver.deleteSession(closing);
@@ -250,19 +255,35 @@ export function createMobileWorkerServer(
         return;
       }
       record.appiumSessionId = sessionId;
-      pushLog(record, 'info', 'appium session established; awaiting execution slice');
-      // Deferred: hold the established session until cancellation, timeout,
-      // or shutdown. No steps run in this checkpoint.
-      await new Promise<void>((_, reject) => {
-        if (record.abort.signal.aborted) {
-          reject(new Error('Cancelled via API.'));
-          return;
-        }
-        record.abort.signal.addEventListener('abort', () => reject(new Error('Cancelled via API.')), {
-          once: true,
-        });
+      // Action engine (Slice 3C-4B-2): execute the validated closed action
+      // set in order. Cancellation, execution timeout, and shutdown abort
+      // the run through record.abort and map below; success is reported
+      // only when every step completed.
+      const engineResult = await runMobileActions({
+        driver,
+        sessionId,
+        assignment,
+        stepTimeoutMs: Math.min(assignment.timeouts.stepMs, config.stepTimeoutMs),
+        signal: record.abort.signal,
+        pushLog: (level, message) => pushLog(record, level, message),
+        onStepStart: (order) => {
+          record.currentStepOrder = order;
+        },
       });
-      throw new Error('Unreachable: abort always settles the wait above.');
+      record.stepResults = engineResult.stepResults;
+      screenshots = engineResult.screenshots;
+      await closeSession();
+      if (engineResult.status === 'passed') {
+        finish('passed', 'unknown', null, null);
+        pushLog(record, 'info', `assignment passed: ${engineResult.stepResults.length} step(s) completed`);
+      } else if (engineResult.status === 'failed') {
+        finish('failed', 'test', engineResult.errorType, engineResult.errorMessage);
+        pushLog(record, 'error', `assignment failed: ${engineResult.errorMessage ?? 'unknown'}`);
+      } else {
+        finish('error', engineResult.classification, engineResult.errorType, engineResult.errorMessage);
+        pushLog(record, 'error', `assignment error: ${engineResult.errorMessage ?? 'unknown'}`);
+      }
+      return;
     } catch (error) {
       const cancelled =
         error instanceof Error &&

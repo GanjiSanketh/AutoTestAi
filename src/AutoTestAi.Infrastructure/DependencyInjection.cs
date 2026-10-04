@@ -122,6 +122,12 @@ public static class DependencyInjection
         services.AddTransient<Executions.PlaywrightWorkerClient>();
         services.AddTransient<IPlaywrightWorkerClient, ExecutionGrid.GridPlaywrightWorkerClient>();
 
+        // Slice 3C-4B-2: Appium execution plane. Same shape as above:
+        // per-worker mobile transport plus the grid dispatch decorator.
+        services.AddHttpClient("appium-worker");
+        services.AddTransient<Executions.MobileWorkerTransport>();
+        services.AddTransient<Application.TestExecution.IMobileWorkerClient, ExecutionGrid.GridAppiumWorkerClient>();
+
         // Slice 7: Jira ticketing boundary (manual creation only; token server-side).
         services.AddHttpClient(Jira.JiraTicketProvider.HttpClientName);
         services.AddTransient<Application.Tickets.IJiraTicketProvider, Jira.JiraTicketProvider>();

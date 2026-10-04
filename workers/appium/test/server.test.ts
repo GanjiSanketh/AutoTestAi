@@ -78,14 +78,21 @@ async function boot(cfg: MobileWorkerConfig, driver?: IMobileDriver): Promise<st
   return `http://localhost:${port}`;
 }
 
-/** Deterministic fake driver: scripted session behavior, no Appium server. */
+/** Deterministic fake driver: scripted session + action behavior, no Appium server. */
 function fakeDriver(options?: {
   failCreate?: unknown;
   deleteCalls?: string[];
   neverResolve?: boolean;
+  failAction?: { action: string; error: unknown };
+  calls?: string[];
+  screenshotBase64?: string;
 }): IMobileDriver {
   const sessions = new Set<string>();
   let counter = 0;
+  const maybeFail = (action: string): void => {
+    options?.calls?.push(action);
+    if (options?.failAction?.action === action) throw options.failAction.error;
+  };
   return {
     async createSession(): Promise<SessionHandle> {
       if (options?.neverResolve) {
@@ -102,6 +109,43 @@ function fakeDriver(options?: {
       sessions.delete(sessionId);
     },
     hasSession: (sessionId: string) => sessions.has(sessionId),
+    async tap(): Promise<void> {
+      maybeFail('tap');
+    },
+    async setText(): Promise<void> {
+      maybeFail('inputText');
+    },
+    async clearText(): Promise<void> {
+      maybeFail('clearText');
+    },
+    async isDisplayed(): Promise<boolean> {
+      maybeFail('assertVisible');
+      return true;
+    },
+    async getText(): Promise<string> {
+      maybeFail('assertText');
+      return 'fake text content';
+    },
+    async swipe(): Promise<void> {
+      maybeFail('swipe');
+    },
+    async pressBack(): Promise<void> {
+      maybeFail('back');
+    },
+    async hideKeyboard(): Promise<'closed' | 'absent'> {
+      maybeFail('hideKeyboard');
+      return 'closed';
+    },
+    async takeScreenshot(): Promise<string> {
+      maybeFail('screenshot');
+      return options?.screenshotBase64 ?? Buffer.from('fake-png').toString('base64');
+    },
+    async activateApp(): Promise<void> {
+      maybeFail('launchApp');
+    },
+    async terminateApp(): Promise<void> {
+      maybeFail('terminateApp');
+    },
   };
 }
 
@@ -116,8 +160,13 @@ async function waitForSession(
     const body = (await response.json()) as {
       status: string;
       appiumSessionId?: string | null;
+      result?: { appiumSessionId?: string | null } | null;
     };
-    if (body.appiumSessionId) return body as never;
+    // The transient progress field clears after session close; the terminal
+    // result always carries the session id for control-plane binding.
+    if (body.appiumSessionId ?? body.result?.appiumSessionId) {
+      return { status: body.status, appiumSessionId: (body.appiumSessionId ?? body.result?.appiumSessionId) ?? null };
+    }
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error('Timed out waiting for session establishment.');
@@ -203,8 +252,9 @@ describe('mobile worker assignment API', () => {
     expect(response.status).toBe(400);
   });
 
-  it('establishes a session and holds it without executing steps', async () => {
-    const base = await boot(config(), fakeDriver());
+  it('establishes a session, executes steps, and reports passed', async () => {
+    const deleteCalls: string[] = [];
+    const base = await boot(config(), fakeDriver({ deleteCalls }));
     const response = await fetch(`${base}/v1/assignments`, {
       method: 'POST',
       headers: authHeaders('test-token'),
@@ -212,8 +262,27 @@ describe('mobile worker assignment API', () => {
     });
     expect(response.status).toBe(202);
     const progress = await waitForSession(base, 'a1');
-    expect(progress.status).toBe('running');
     expect(progress.appiumSessionId).toBe('fake-session-1');
+    const { result } = await waitForResult(base, 'a1');
+    expect(result.status).toBe('passed');
+    expect(deleteCalls).toEqual(['fake-session-1']);
+  });
+
+  it('maps action failure to a failed test result, never success', async () => {
+    const base = await boot(
+      config(),
+      fakeDriver({ failAction: { action: 'launchApp', error: { kind: 'test', message: 'element is not interactable' } } }),
+    );
+    const response = await fetch(`${base}/v1/assignments`, {
+      method: 'POST',
+      headers: authHeaders('test-token'),
+      body: JSON.stringify(assignment({ assignmentId: 'action-fail-1' })),
+    });
+    expect(response.status).toBe(202);
+    const { result } = await waitForResult(base, 'action-fail-1');
+    expect(result.status).toBe('failed');
+    expect(result.classification).toBe('test');
+    expect(result.status).not.toBe('passed');
   });
 
   it('maps session creation failure to a deterministic error', async () => {
@@ -240,7 +309,10 @@ describe('mobile worker assignment API', () => {
     await fetch(`${base}/v1/assignments`, {
       method: 'POST',
       headers,
-      body: JSON.stringify(assignment({ assignmentId: 'cancel-1' })),
+      // Long wait keeps the run alive so DELETE lands mid-execution.
+      body: JSON.stringify(
+        assignment({ assignmentId: 'cancel-1', steps: [{ order: 1, action: 'wait', target: null, value: '8000' }] }),
+      ),
     });
     await waitForSession(base, 'cancel-1');
     const response = await fetch(`${base}/v1/assignments/cancel-1`, { method: 'DELETE', headers });

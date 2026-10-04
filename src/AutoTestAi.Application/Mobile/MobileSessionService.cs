@@ -21,6 +21,12 @@ public interface IMobileSessionService
     Task<MobileDeviceSession> ActivateAsync(Guid projectId, Guid sessionId, Guid assignmentId, Guid assignmentToken, string appiumSessionId, CancellationToken ct);
     Task HeartbeatAsync(Guid projectId, Guid sessionId, Guid assignmentId, Guid assignmentToken, CancellationToken ct);
     Task CloseAsync(Guid projectId, Guid sessionId, Guid assignmentId, Guid assignmentToken, CancellationToken ct);
+    /// <summary>
+    /// Best-effort terminal-path close (Slice 3C-4B-2): closes the session
+    /// bound to an assignment, if any. Idempotent; throws ConflictException
+    /// when ownership moved on so callers can swallow stale closes.
+    /// </summary>
+    Task CloseForAssignmentAsync(Guid projectId, Guid assignmentId, Guid assignmentToken, CancellationToken ct);
     Task<int> ReapStaleAsync(DateTimeOffset staleBefore, int take, CancellationToken ct);
 }
 
@@ -126,8 +132,17 @@ public sealed class MobileSessionService : IMobileSessionService
         _logger.LogInformation("Mobile session {SessionId} closed for assignment {AssignmentId}.", session.Id, assignmentId);
     }
 
-    public async Task<int> ReapStaleAsync(DateTimeOffset staleBefore, int take, CancellationToken ct)
+    public async Task CloseForAssignmentAsync(Guid projectId, Guid assignmentId, Guid assignmentToken, CancellationToken ct)
     {
+        var session = await _sessions.FindSessionByAssignmentAsync(assignmentId, ct);
+        if (session is null)
+            return; // idempotent: no runtime session was ever created
+        if (session.ProjectId != projectId)
+            throw new NotFoundException("Mobile session not found.");
+        await CloseAsync(projectId, session.Id, assignmentId, assignmentToken, ct);
+    }
+
+    public async Task<int> ReapStaleAsync(DateTimeOffset staleBefore, int take, CancellationToken ct)    {
         var stale = await _sessions.ListStaleSessionsAsync(staleBefore, Math.Clamp(take, 1, 100), ct);
         var orphaned = 0;
         foreach (var row in stale)

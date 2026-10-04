@@ -1,13 +1,14 @@
 /**
- * Mobile worker execution protocol (Slice 3C-4A).
+ * Mobile worker execution protocol (Slices 3C-4A through 3C-4B-2).
  * Mirrors the C# contract (IMobileWorkerClient DTOs). JSON over HTTP,
  * camelCase throughout. The worker receives structured steps and
  * server-built capabilities only — never credentials, provider keys,
  * database connection strings, or ClaimToken values.
  *
- * Actual Appium driver creation is deferred to the execution slice; this
- * checkpoint validates the envelope and reports a controlled deferred
- * result. It never reports success for work it did not perform.
+ * Slice 3C-4B-2 executes the closed action set against a real Appium
+ * session (Android-first) and reports passed/failed/error/cancelled/
+ * timedOut results with screenshots. It never reports success for work
+ * it did not perform.
  */
 
 export interface MobileStep {

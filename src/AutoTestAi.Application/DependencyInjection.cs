@@ -37,6 +37,7 @@ public static class DependencyInjection
         services.AddScoped<ITestCaseService, TestCaseService>();
         services.AddScoped<ITestExecutionService, TestExecutionService>();
         services.AddScoped<IExecutionEngine, ExecutionEngine>();
+        services.AddScoped<IMobileExecutionCoordinator, MobileExecutionCoordinator>();
         services.AddScoped<IFailureEvidenceService, FailureEvidenceService>();
         services.AddScoped<IFailureAnalysisService, FailureAnalysisService>();
         services.AddScoped<SelfHealing.ISelfHealingPolicyService, SelfHealing.SelfHealingPolicyService>();
