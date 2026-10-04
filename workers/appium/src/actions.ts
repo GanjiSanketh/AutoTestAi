@@ -11,10 +11,26 @@
  * are NEVER logged. Logs carry order/action/outcome only.
  */
 import type { IMobileDriver, InteractionError, SwipeDirection } from './driver.js';
+import {
+  buildMobileEvidenceEnvelope,
+  generateMobileCandidates,
+  isMobileHealingEligible,
+  mobileStrategyLabel,
+  normalizeMobileHealingPolicy,
+  parseHierarchySnapshots,
+  parseMobileAiCandidates,
+  sanitizeRecoveredValue,
+  validateMobileCandidate,
+  type MobileHealingCandidate,
+  type MobileHealingEvidenceEnvelope,
+  type MobileHealingInspector,
+} from './mobileHealing.js';
 import { sanitizePageSource, type EvidenceSecrets } from './evidence.js';
 import { parseMobileTarget, type ResolvedMobileLocator } from './locators.js';
+import { isSensitiveTarget, REDACTED } from './redaction.js';
 import type {
   MobileAssignment,
+  MobileHealingAttempt,
   MobileLog,
   MobilePageSource,
   MobileScreenshot,
@@ -29,6 +45,8 @@ export interface ActionEngineResult {
   screenshots: MobileScreenshot[];
   /** Bounded, redacted page-source snapshots (failure evidence only). */
   pageSources: MobilePageSource[];
+  /** One outcome record per healed-attempted step (append-only, execution-scoped). */
+  healingAttempts: MobileHealingAttempt[];
   /** Terminal status for the run: never 'passed' unless every step completed. */
   status: 'passed' | 'failed' | 'error';
   classification: 'test' | 'environment' | 'automation';
@@ -45,6 +63,12 @@ export interface ActionEngineDeps {
   signal: AbortSignal;
   pushLog: (level: MobileLog['level'], message: string) => void;
   onStepStart?: (order: number) => void;
+  /**
+   * Slice 3C-4C AI fallback: POSTs a redacted evidence envelope to the
+   * control-plane healing/suggest endpoint and returns the raw contract.
+   * Absent (or policy-disabled) means deterministic-only healing.
+   */
+  suggestAi?: (envelope: MobileHealingEvidenceEnvelope) => Promise<string>;
 }
 
 const MAX_WAIT_MS = 30000;
@@ -109,11 +133,15 @@ function requireValue(step: MobileStep): string {
 }
 
 export async function runMobileActions(deps: ActionEngineDeps): Promise<ActionEngineResult> {
-  const { driver, sessionId, assignment, stepTimeoutMs, signal, pushLog, onStepStart } = deps;
+  const { driver, sessionId, assignment, stepTimeoutMs, signal, pushLog, onStepStart, suggestAi } = deps;
   const steps = [...assignment.steps].sort((a, b) => a.order - b.order);
   const stepResults: MobileStepResult[] = [];
   const screenshots: MobileScreenshot[] = [];
   const pageSources: MobilePageSource[] = [];
+  const healingAttempts: MobileHealingAttempt[] = [];
+  // Slice 3C-4C: normalized once per run; disabled/absent preserves
+  // pre-healing behavior exactly (no records, no retries).
+  const healingPolicy = normalizeMobileHealingPolicy(assignment.healing);
   // Exact-mask material for evidence: values typed through text-entry
   // steps plus the assignment token and binary URL. Never logged.
   const evidenceSecrets: EvidenceSecrets = {
@@ -161,6 +189,144 @@ export async function runMobileActions(deps: ActionEngineDeps): Promise<ActionEn
     if (signal.aborted) throw new Error('Cancelled via API.');
   };
 
+  const recordHealingAttempt = (
+    step: MobileStep,
+    candidate: MobileHealingCandidate | null,
+    candidateCount: number,
+    wasApplied: boolean,
+    isAiAssisted: boolean,
+    errorMessage: string | null,
+  ): void => {
+    const original = parseMobileTarget(step.target);
+    const sensitive = isSensitiveTarget(step.target);
+    healingAttempts.push({
+      stepOrder: step.order,
+      stepAction: step.action,
+      originalStrategy: original?.kind ?? null,
+      originalValue: original === null ? null : sensitive ? REDACTED : original.value.slice(0, 2000),
+      recoveredStrategy: candidate?.strategy ?? null,
+      recoveredValue:
+        candidate === null ? null : sanitizeRecoveredValue(sensitive, `${candidate.strategy}=${candidate.value}`),
+      healingStrategy: mobileStrategyLabel(candidate),
+      status: wasApplied ? 'Applied' : 'Failed',
+      candidateCount,
+      wasApplied,
+      isAiAssisted,
+      errorMessage: errorMessage?.slice(0, 2000) ?? null,
+    });
+  };
+
+  const retryWithCandidate = async (
+    step: MobileStep,
+    candidate: MobileHealingCandidate,
+    candidateCount: number,
+    isAiAssisted: boolean,
+    startedAt: number,
+  ): Promise<boolean> => {
+    const recoveredTarget = `${candidate.strategy}=${candidate.value}`;
+    const healedStep: MobileStep = { ...step, target: recoveredTarget };
+    try {
+      throwIfAborted();
+      await runStep(driver, sessionId, assignment, healedStep, stepTimeoutMs, signal, captureScreenshot);
+    } catch (retryError) {
+      // Cancellation during the heal retry stays cancellation; any other
+      // retry failure keeps the ORIGINAL failure authoritative.
+      if (signal.aborted || (retryError instanceof Error && /cancelled via api/i.test(retryError.message))) {
+        throw retryError;
+      }
+      return false;
+    }
+    const completedAt = Date.now();
+    const sensitive = isSensitiveTarget(step.target);
+    stepResults.push({
+      order: step.order,
+      action: step.action,
+      target: step.target ?? null,
+      status: 'passed',
+      startedAtUnixMs: startedAt,
+      completedAtUnixMs: completedAt,
+      durationMs: completedAt - startedAt,
+      healed: true,
+      recoveredTarget: sanitizeRecoveredValue(sensitive, recoveredTarget),
+      healingStrategy: candidate.strategy,
+      aiAssisted: isAiAssisted,
+    });
+    recordHealingAttempt(step, candidate, candidateCount, true, isAiAssisted, null);
+    pushLog('info', `step ${step.order} (${step.action}) healed`);
+    return true;
+  };
+
+  /**
+   * Slice 3C-4C deterministic-first healing: exactly one validated retry
+   * with a recovered locator. Returns true when the step healed (passed
+   * result already pushed); false leaves the original failure authoritative.
+   * Never consumes MaxAttempts, never creates assignments or sessions.
+   */
+  const tryHealStep = async (
+    step: MobileStep,
+    failureMessage: string,
+    startedAt: number,
+  ): Promise<boolean> => {
+    if (!healingPolicy.enabled || healingPolicy.maxAttemptsPerStep < 1) return false;
+    if (!isMobileHealingEligible(step.action, failureMessage)) return false;
+    const action = step.action.trim().toLowerCase();
+    pushLog('info', `step ${step.order} (${step.action}) healing started`);
+    let raw: string;
+    try {
+      throwIfAborted();
+      raw = await driver.getPageSource(sessionId);
+    } catch {
+      pushLog('warning', `step ${step.order} healing skipped: hierarchy unavailable`);
+      recordHealingAttempt(step, null, 0, false, false, 'Hierarchy snapshot unavailable.');
+      return false;
+    }
+    const snapshots = parseHierarchySnapshots(raw);
+    const inspector: MobileHealingInspector = {
+      snapshot: async () => snapshots,
+      describe: (node) => ({
+        enabled: node.enabled ?? false,
+        actionable: node.clickable ?? node.enabled ?? false,
+      }),
+    };
+    const isAssertText = action === 'asserttext';
+    const deterministic = generateMobileCandidates(
+      snapshots,
+      step.target,
+      isAssertText ? (step.value ?? null) : null,
+      isAssertText,
+      healingPolicy,
+    );
+    for (const candidate of deterministic) {
+      throwIfAborted();
+      const validation = await validateMobileCandidate(candidate, action, inspector, healingPolicy, signal);
+      if (!validation.ok) continue;
+      if (await retryWithCandidate(step, candidate, deterministic.length, false, startedAt)) return true;
+    }
+    if (healingPolicy.aiFallbackEnabled && suggestAi) {
+      try {
+        throwIfAborted();
+        const response = await suggestAi(
+          buildMobileEvidenceEnvelope(action, step.target, snapshots, evidenceSecrets),
+        );
+        const parsed = parseMobileAiCandidates(response, healingPolicy);
+        for (const candidate of parsed.candidates) {
+          throwIfAborted();
+          const validation = await validateMobileCandidate(candidate, action, inspector, healingPolicy, signal);
+          if (!validation.ok) continue;
+          if (await retryWithCandidate(step, candidate, parsed.candidates.length, true, startedAt)) return true;
+        }
+      } catch (error) {
+        // Controlled healing failure: the suggest round trip (or abort
+        // surfacing as a throw above, rethrown below) never escalates.
+        if (signal.aborted || (error instanceof Error && /cancelled via api/i.test(error.message))) throw error;
+        pushLog('warning', `step ${step.order} AI healing skipped: suggest unavailable`);
+      }
+    }
+    recordHealingAttempt(step, null, deterministic.length, false, false, 'No validated recovery candidate.');
+    pushLog('info', `step ${step.order} (${step.action}) healing failed`);
+    return false;
+  };
+
   for (const step of steps) {
     throwIfAborted();
     onStepStart?.(step.order);
@@ -186,6 +352,10 @@ export async function runMobileActions(deps: ActionEngineDeps): Promise<ActionEn
         throw error;
       }
       const failure = failureKind(error);
+      // Slice 3C-4C: exactly one validated heal retry before terminal
+      // failure. A healed step passes and the run continues; otherwise the
+      // original failure below remains authoritative.
+      if (await tryHealStep(step, failure.message, startedAt)) continue;
       stepResults.push({
         order: step.order,
         action: step.action,
@@ -221,6 +391,7 @@ export async function runMobileActions(deps: ActionEngineDeps): Promise<ActionEn
         stepResults,
         screenshots,
         pageSources,
+        healingAttempts,
         status: failure.kind === 'test' ? 'failed' : 'error',
         classification: failure.kind,
         errorType: failure.kind === 'test' ? 'AssertionError' : 'StepError',
@@ -233,6 +404,7 @@ export async function runMobileActions(deps: ActionEngineDeps): Promise<ActionEn
     stepResults,
     screenshots,
     pageSources,
+    healingAttempts,
     status: 'passed',
     classification: 'test',
     errorType: null,

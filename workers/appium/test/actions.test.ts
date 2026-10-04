@@ -52,6 +52,7 @@ function fakeDriver(script: FakeScript = {}, calls: string[] = []): IMobileDrive
     calls.push(name);
     if (Object.hasOwn(script, name)) {
       const scripted = script[name];
+      if (typeof scripted === 'function') return await (scripted as () => T | Promise<T>)();
       if (scripted instanceof Error) throw scripted;
       if (scripted !== null && typeof scripted === 'object' && 'kind' in (scripted as object)) {
         throw scripted;
@@ -445,5 +446,266 @@ describe('mobile action dispatch', () => {
     expect(resultB.status).toBe('failed');
     expect(callsA).toEqual(['tap']);
     expect(callsB).toEqual(['tap', 'screenshot-capture', 'pagesource-capture']);
+  });
+});
+
+describe('mobile healing retries', () => {
+  const healing = {
+    enabled: true,
+    aiFallbackEnabled: false,
+    maxAttemptsPerStep: 1,
+  };
+
+  const hierarchyWith = (attrs: string): string =>
+    `<hierarchy><node index="0" class="android.widget.Button" enabled="true" clickable="true" ${attrs} /></hierarchy>`;
+
+  it('healing disabled preserves existing behavior with no records', async () => {
+    const calls: string[] = [];
+    const result = await runMobileActions(
+      deps(fakeDriver({ assertVisible: false }, calls), {
+        steps: steps([{ action: 'assertVisible', target: 'accessibilityId=missing' }]),
+      }).deps,
+    );
+    expect(result.status).toBe('failed');
+    expect(result.healingAttempts).toHaveLength(0);
+    expect(result.stepResults[0]).not.toMatchObject({ healed: true });
+    expect(calls).toEqual(['assertVisible', 'screenshot-capture', 'pagesource-capture']);
+  });
+
+  it('deterministic cross-strategy recovery heals the step exactly once', async () => {
+    let taps = 0;
+    const calls: string[] = [];
+    const result = await runMobileActions(
+      deps(
+        fakeDriver(
+          {
+            tap: () => {
+              taps += 1;
+              if (taps === 1) throw { kind: 'test', message: 'Cannot tap: element is not interactable (gone)' };
+            },
+            'pagesource-capture': hierarchyWith('resource-id="submit" content-desc="other"'),
+          },
+          calls,
+        ),
+        {
+          steps: steps([{ action: 'tap', target: 'accessibilityId=submit' }]),
+          healing,
+        },
+      ).deps,
+    );
+    expect(result.status).toBe('passed');
+    expect(taps).toBe(2);
+    expect(result.stepResults[0]).toMatchObject({
+      status: 'passed',
+      healed: true,
+      recoveredTarget: 'resourceId=submit',
+      healingStrategy: 'resourceId',
+      aiAssisted: false,
+    });
+    expect(result.healingAttempts).toHaveLength(1);
+    expect(result.healingAttempts[0]).toMatchObject({
+      stepOrder: 1,
+      stepAction: 'tap',
+      originalStrategy: 'accessibilityId',
+      recoveredStrategy: 'resourceId',
+      healingStrategy: 'Structural',
+      status: 'Applied',
+      wasApplied: true,
+      isAiAssisted: false,
+    });
+  });
+
+  it('failed recovery keeps the original failure and records the attempt', async () => {
+    const calls: string[] = [];
+    const result = await runMobileActions(
+      deps(
+        fakeDriver(
+          {
+            tap: () => {
+              throw { kind: 'test', message: 'Cannot tap: element is not interactable (gone)' };
+            },
+            'pagesource-capture': hierarchyWith('resource-id="com.shop:id/other"'),
+          },
+          calls,
+        ),
+        {
+          steps: steps([{ action: 'tap', target: 'accessibilityId=vanished' }]),
+          healing,
+        },
+      ).deps,
+    );
+    expect(result.status).toBe('failed');
+    expect(result.classification).toBe('test');
+    expect(result.errorMessage).toContain('element is not interactable');
+    expect(result.healingAttempts).toHaveLength(1);
+    expect(result.healingAttempts[0]).toMatchObject({ status: 'Failed', wasApplied: false });
+    // Evidence still captured for the terminal failure.
+    expect(result.pageSources).toHaveLength(1);
+  });
+
+  it('retries at most once per step', async () => {
+    let taps = 0;
+    const result = await runMobileActions(
+      deps(
+        fakeDriver({
+          tap: () => {
+            taps += 1;
+            throw { kind: 'test', message: 'Cannot tap: element is not interactable (gone)' };
+          },
+          'pagesource-capture': hierarchyWith('resource-id="submit"'),
+        }),
+        {
+          steps: steps([{ action: 'tap', target: 'accessibilityId=submit' }]),
+          healing,
+        },
+      ).deps,
+    );
+    expect(result.status).toBe('failed');
+    // Initial attempt + exactly one healing retry; the recovered locator
+    // fails the same way, and no further retries follow.
+    expect(taps).toBe(2);
+  });
+
+  it('assertText mismatches never heal the expectation', async () => {
+    let texts = 0;
+    const result = await runMobileActions(
+      deps(
+        fakeDriver({
+          assertText: () => {
+            texts += 1;
+            return 'Something else entirely';
+          },
+          'pagesource-capture': hierarchyWith('resource-id="com.shop:id/t" text="Expected text"'),
+        }),
+        {
+          steps: steps([{ action: 'assertText', target: 'accessibilityId=t', value: 'Expected text' }]),
+          healing,
+        },
+      ).deps,
+    );
+    expect(result.status).toBe('failed');
+    expect(texts).toBe(1);
+    expect(result.healingAttempts).toHaveLength(0);
+  });
+
+  it('assertText locator recovery heals without rewriting the expectation', async () => {
+    const result = await runMobileActions(
+      deps(
+        fakeDriver(
+          {
+            assertText: (() => {
+              let calls = 0;
+              return () => {
+                calls += 1;
+                if (calls === 1) throw { kind: 'test', message: 'Cannot assertText: element is not interactable (gone)' };
+                return 'Welcome back, shopper';
+              };
+            })(),
+            'pagesource-capture': hierarchyWith('resource-id="com.shop:id/title" text="Welcome back"'),
+          },
+        ),
+        {
+          steps: steps([{ action: 'assertText', target: 'accessibilityId=old-title', value: 'Welcome back' }]),
+          healing,
+        },
+      ).deps,
+    );
+    expect(result.status).toBe('passed');
+    expect(result.stepResults[0]).toMatchObject({ healed: true, aiAssisted: false });
+    expect(result.healingAttempts[0]).toMatchObject({ status: 'Applied', healingStrategy: 'Structural' });
+  });
+
+  it('rejected AI candidates keep the original failure without retry', async () => {
+    let taps = 0;
+    const result = await runMobileActions({
+      ...deps(
+        fakeDriver(
+          {
+            tap: () => {
+              taps += 1;
+              throw { kind: 'test', message: 'Cannot tap: element is not interactable (gone)' };
+            },
+            'pagesource-capture': hierarchyWith('resource-id="com.shop:id/other"'),
+          },
+        ),
+        {
+          steps: steps([{ action: 'tap', target: 'accessibilityId=vanished' }]),
+          healing: { ...healing, aiFallbackEnabled: true },
+        },
+      ).deps,
+      suggestAi: async () =>
+        JSON.stringify({ candidates: [{ strategy: 'xpath', value: '//node', confidence: 0.9 }] }),
+    });
+    // Deterministic generation finds nothing and the xpath AI candidate is
+    // rejected by the closed strategy set: no retry, original failure stands.
+    expect(result.status).toBe('failed');
+    expect(taps).toBe(1);
+    expect(result.healingAttempts).toHaveLength(1);
+    expect(result.healingAttempts[0]).toMatchObject({ status: 'Failed', wasApplied: false });
+  });
+
+  it('AI success marks aiAssisted true', async () => {
+    let taps = 0;
+    const result = await runMobileActions({
+      ...deps(
+        fakeDriver(
+          {
+            tap: () => {
+              taps += 1;
+              if (taps === 1) throw { kind: 'test', message: 'Cannot tap: element is not interactable (gone)' };
+            },
+            'pagesource-capture': hierarchyWith('resource-id="com.shop:id/ai-target"'),
+          },
+        ),
+        {
+          steps: steps([{ action: 'tap', target: 'accessibilityId=vanished' }]),
+          healing: { ...healing, aiFallbackEnabled: true },
+        },
+      ).deps,
+      suggestAi: async () =>
+        JSON.stringify({ candidates: [{ strategy: 'resourceId', value: 'com.shop:id/ai-target', confidence: 0.9 }] }),
+    });
+    // Deterministic generation finds nothing ('vanished' relates to nothing
+    // live); the validated AI candidate drives the single retry to success.
+    expect(result.status).toBe('passed');
+    expect(taps).toBe(2);
+    expect(result.stepResults[0]).toMatchObject({
+      healed: true,
+      recoveredTarget: 'resourceId=com.shop:id/ai-target',
+      aiAssisted: true,
+    });
+    expect(result.healingAttempts).toHaveLength(1);
+    expect(result.healingAttempts[0]).toMatchObject({
+      status: 'Applied',
+      wasApplied: true,
+      isAiAssisted: true,
+      healingStrategy: 'Ai',
+    });
+  });
+
+  it('sanitizes recovered values for sensitive targets', async () => {
+    let sets = 0;
+    const result = await runMobileActions(
+      deps(
+        fakeDriver(
+          {
+            inputText: () => {
+              sets += 1;
+              if (sets === 1) throw { kind: 'test', message: 'Cannot inputText: element is not interactable (gone)' };
+            },
+            'pagesource-capture': hierarchyWith('content-desc="com.shop:id/password" resource-id="hunter2-secret"'),
+          },
+        ),
+        {
+          steps: steps([{ action: 'inputText', target: 'resourceId=com.shop:id/password', value: 'hunter2-secret' }]),
+          healing,
+        },
+      ).deps,
+    );
+    expect(result.status).toBe('passed');
+    // The recovered locator echoes a secret: the whole target is masked.
+    expect(result.stepResults[0]).toMatchObject({ healed: true, recoveredTarget: '[REDACTED]' });
+    expect(result.healingAttempts[0]!.recoveredValue).toBe('[REDACTED]');
+    expect(JSON.stringify(result)).not.toContain('hunter2-secret');
   });
 });

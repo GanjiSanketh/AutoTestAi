@@ -185,6 +185,10 @@ public sealed class MobileWorkerTransport
                 s.TryGetProperty("contentType", out var ctp) && ctp.ValueKind == JsonValueKind.String ? ctp.GetString() ?? "text/plain" : "text/plain",
                 s.TryGetProperty("textContent", out var text) && text.ValueKind == JsonValueKind.String ? text.GetString() ?? string.Empty : string.Empty)).ToList()
             : new List<MobileServerLogDto>();
+        // Healing attempts are supplementary; absent means no healing ran.
+        var healing = root.TryGetProperty("healingAttempts", out var healingEl) && healingEl.ValueKind == JsonValueKind.Array
+            ? healingEl.EnumerateArray().Select(ParseHealingAttempt).Where(h => h is not null).Select(h => h!).ToList()
+            : new List<WorkerHealingAttemptDto>();
         var sessionId = root.TryGetProperty("appiumSessionId", out var sess) && sess.ValueKind == JsonValueKind.String
             ? sess.GetString() : null;
         return new MobileAssignmentResultDto(
@@ -194,7 +198,7 @@ public sealed class MobileWorkerTransport
             Str(root, "errorType"),
             Str(root, "errorMessage"),
             Long(root, "durationMs"),
-            steps, logs, shots, sessionId, sources, serverLogs);
+            steps, logs, shots, sessionId, sources, serverLogs, healing);
     }
 
     private static MobileStepResultDto ParseStep(JsonElement s) => new(
@@ -205,11 +209,37 @@ public sealed class MobileWorkerTransport
         Long(s, "startedAtUnixMs"),
         Long(s, "completedAtUnixMs"),
         Long(s, "durationMs"),
-        Str(s, "errorMessage"));
+        Str(s, "errorMessage"),
+        Bool(s, "healed"),
+        Str(s, "recoveredTarget"),
+        Str(s, "healingStrategy"),
+        Bool(s, "aiAssisted"));
 
     private static MobileLogDto ParseLog(JsonElement l) => new(
         Long(l, "seq"), Long(l, "timestampUnixMs"),
         Str(l, "level") ?? "Information", Str(l, "message") ?? string.Empty);
+
+    private static WorkerHealingAttemptDto? ParseHealingAttempt(JsonElement h)
+    {
+        if (h.ValueKind != JsonValueKind.Object) return null;
+        var order = Int(h, "stepOrder");
+        var action = Str(h, "action") ?? Str(h, "stepAction");
+        if (order < 1 || string.IsNullOrWhiteSpace(action)) return null;
+        return new WorkerHealingAttemptDto(
+            order, action,
+            Str(h, "originalStrategy"), Str(h, "originalValue"),
+            Str(h, "recoveredStrategy"), Str(h, "recoveredValue"),
+            Str(h, "healingStrategy") ?? "none",
+            Str(h, "status") ?? "Failed",
+            Int(h, "candidateCount"),
+            Bool(h, "wasApplied") ?? false,
+            Bool(h, "isAiAssisted") ?? false,
+            Str(h, "errorMessage"));
+    }
+
+    private static bool? Bool(JsonElement e, string name)
+        => e.TryGetProperty(name, out var v) && (v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False)
+            ? v.GetBoolean() : null;
 
     private static string? Str(JsonElement e, string name)
         => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;

@@ -52,4 +52,8 @@ execution site.
 - Failure evidence (page-source snapshots, log tails) is exact-masked,
   heuristically redacted, and hard-bounded (1 MB / 256 KB tail) before it
   enters any result; raw evidence is never logged or persisted.
+- Self-healing (Slice 3C-4C, policy-gated): deterministic cross-strategy
+  locator recovery with exactly one validated retry per failed step.
+  Closed strategy set (`accessibilityId`, `resourceId`); AI fallback only
+  through the control-plane suggest endpoint, validated identically.
 - Request bodies are bounded (4MB); logs are bounded (2000 entries).

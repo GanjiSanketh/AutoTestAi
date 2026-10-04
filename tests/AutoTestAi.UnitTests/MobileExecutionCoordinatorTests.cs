@@ -6,6 +6,7 @@ using AutoTestAi.Application.ExecutionGrid;
 using AutoTestAi.Application.Identity;
 using AutoTestAi.Application.Mobile;
 using AutoTestAi.Application.Projects;
+using AutoTestAi.Application.SelfHealing;
 using AutoTestAi.Application.Storage;
 using AutoTestAi.Application.TestCases;
 using AutoTestAi.Application.TestExecution;
@@ -232,6 +233,15 @@ public sealed class MobileExecutionCoordinatorTests
             => Task.CompletedTask;
     }
 
+    private sealed class FakePolicyStore : ISelfHealingPolicyStore
+    {
+        public SelfHealingPolicy? Row;
+        public Task<SelfHealingPolicy?> GetByProjectAsync(Guid projectId, CancellationToken ct)
+            => Task.FromResult(Row is not null && Row.ProjectId == projectId ? Row : null);
+        public Task AddAsync(SelfHealingPolicy policy, CancellationToken ct) => Task.CompletedTask;
+        public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
+    }
+
     private sealed class FakeWebWorker : IPlaywrightWorkerClient
     {
         public bool Called;
@@ -269,7 +279,8 @@ public sealed class MobileExecutionCoordinatorTests
         Guid DeviceId,
         GridWorker GridWorker);
 
-    private static Harness Create(string stepsJson = """[{"order":1,"action":"launchApp"}]""")
+    private static Harness Create(string stepsJson = """[{"order":1,"action":"launchApp"}]""",
+        ISelfHealingPolicyStore? healingPolicies = null)
     {
         var store = new FakeExecutionStore();
         var cases = new FakeCases();
@@ -371,7 +382,8 @@ public sealed class MobileExecutionCoordinatorTests
             executionOptions, Options.Create(new GridOptions()),
             new MobileCapabilityBuilder(Options.Create(new MobileOptions())),
             new SystemDateTimeProvider(),
-            NullLogger<MobileExecutionCoordinator>.Instance);
+            NullLogger<MobileExecutionCoordinator>.Instance,
+            healingPolicies: healingPolicies);
         return new Harness(coordinator, store, cases, mobile, scheduler, assignments,
             worker, events, artifacts, execution, test, poolId, appId, slotId, deviceId, gridWorker);
     }
@@ -381,7 +393,8 @@ public sealed class MobileExecutionCoordinatorTests
         IReadOnlyList<MobileScreenshotDto>? screenshots = null,
         IReadOnlyList<MobileStepResultDto>? steps = null,
         IReadOnlyList<MobilePageSourceDto>? pageSources = null,
-        IReadOnlyList<MobileServerLogDto>? serverLogs = null)
+        IReadOnlyList<MobileServerLogDto>? serverLogs = null,
+        IReadOnlyList<WorkerHealingAttemptDto>? healingAttempts = null)
         => new("test", status, 1,
             steps ?? new[] { new MobileStepResultDto(1, "launchApp", null, "passed", 1, 2, 1, null) },
             Array.Empty<MobileLogDto>(),
@@ -390,7 +403,7 @@ public sealed class MobileExecutionCoordinatorTests
                 steps ?? new[] { new MobileStepResultDto(1, "launchApp", null, "passed", 1, 2, 1, null) },
                 Array.Empty<MobileLogDto>(),
                 screenshots ?? Array.Empty<MobileScreenshotDto>(), "appium-session-1",
-                pageSources, serverLogs),
+                pageSources, serverLogs, healingAttempts),
             "appium-session-1");
 
     private static void ScriptTerminal(Harness h, MobileAssignmentProgressDto terminal)
@@ -934,6 +947,128 @@ public sealed class MobileExecutionCoordinatorTests
         // The trusted transport still carries the resolved value to the worker.
         var sent = Assert.Single(h.Worker.Started);
         Assert.Equal("hunter2-secret", sent.Steps[0].Value);
+    }
+
+    // ---------- Slice 3C-4C: self-healing ----------
+
+    private static FakePolicyStore EnabledPolicy(bool aiFallback = false) => new()
+    {
+        Row = new SelfHealingPolicy
+        {
+            ProjectId = ProjectA, Enabled = true, AiFallbackEnabled = aiFallback,
+            AllowedStrategies = "accessibilityid,resourceid",
+        },
+    };
+
+    [Fact]
+    public void Transport_RoundTrip_ParsesHealing()
+    {
+        var json = """
+            {"assignmentId":"test","status":"passed","currentStepOrder":1,
+             "stepResults":[{"order":1,"action":"tap","target":"accessibilityId=gone","status":"passed",
+              "startedAtUnixMs":1,"completedAtUnixMs":2,"durationMs":1,"errorMessage":null,
+              "healed":true,"recoveredTarget":"resourceId=com.shop:id/login","healingStrategy":"resourceId","aiAssisted":false}],
+             "logs":[],
+             "result":{"assignmentId":"test","status":"passed","durationMs":5,
+              "stepResults":[],"logs":[],"screenshots":[],
+              "healingAttempts":[{"stepOrder":1,"stepAction":"tap","originalStrategy":"accessibilityId",
+               "originalValue":"gone","recoveredStrategy":"resourceId","recoveredValue":"com.shop:id/login",
+               "healingStrategy":"Structural","status":"Applied","candidateCount":1,
+               "wasApplied":true,"isAiAssisted":false,"errorMessage":null}],
+              "appiumSessionId":"s"},"appiumSessionId":"s"}
+            """;
+        using var doc = JsonDocument.Parse(json);
+        var progress = AutoTestAi.Infrastructure.Executions.MobileWorkerTransport.ParseProgress(doc.RootElement);
+
+        var step = Assert.Single(progress.StepResults);
+        Assert.True(step.Healed);
+        Assert.Equal("resourceId=com.shop:id/login", step.RecoveredTarget);
+        var attempt = Assert.Single(progress.Result!.HealingAttempts ?? Array.Empty<WorkerHealingAttemptDto>());
+        Assert.Equal("Structural", attempt.HealingStrategy);
+        Assert.True(attempt.WasApplied);
+    }
+
+    [Fact]
+    public async Task Policy_Enabled_PassedIntoAssignment()
+    {
+        var h = Create(healingPolicies: EnabledPolicy());
+        ScriptTerminal(h, TerminalProgress("passed", "unknown"));
+
+        await h.Coordinator.RunMobileAsync(h.Execution.Id, null, CancellationToken.None);
+
+        var sent = Assert.Single(h.Worker.Started);
+        Assert.NotNull(sent.Healing);
+        Assert.True(sent.Healing!.Enabled);
+        Assert.Equal(1, sent.Healing!.MaxAttemptsPerStep);
+        Assert.Contains("accessibilityid", sent.Healing!.AllowedStrategies);
+    }
+
+    [Fact]
+    public async Task Policy_Absent_StaysNull_PreservingLegacyBehavior()
+    {
+        var h = Create();
+        ScriptTerminal(h, TerminalProgress("passed", "unknown"));
+
+        var outcome = await h.Coordinator.RunMobileAsync(h.Execution.Id, null, CancellationToken.None);
+
+        var sent = Assert.Single(h.Worker.Started);
+        Assert.Null(sent.Healing);
+        Assert.Equal(ExecutionTestStatus.Passed, outcome.Status);
+        Assert.Null(outcome.HealingAttempts);
+    }
+
+    [Fact]
+    public async Task HealedSteps_MappedIntoOutcome_WithAttempts()
+    {
+        var h = Create(healingPolicies: EnabledPolicy());
+        var healedStep = new MobileStepResultDto(1, "tap", "accessibilityId=gone", "passed",
+            1, 2, 1, null, true, "accessibilityId=found", "accessibilityId", false);
+        var attempt = new WorkerHealingAttemptDto(1, "tap", "accessibilityId", "gone",
+            "accessibilityId", "found", "TestAttribute", "Applied", 1, true, false, null);
+        ScriptTerminal(h, TerminalProgress("passed", "unknown",
+            steps: new[] { healedStep }, healingAttempts: new[] { attempt }));
+
+        var outcome = await h.Coordinator.RunMobileAsync(h.Execution.Id, null, CancellationToken.None);
+
+        Assert.Equal(ExecutionTestStatus.Passed, outcome.Status);
+        var step = Assert.Single(outcome.Steps);
+        Assert.True(step.Healed);
+        Assert.Equal("accessibilityId=found", step.RecoveredTarget);
+        var mapped = Assert.Single(outcome.HealingAttempts ?? Array.Empty<WorkerHealingAttemptDto>());
+        Assert.Equal("TestAttribute", mapped.HealingStrategy);
+        Assert.True(mapped.WasApplied);
+        Assert.False(mapped.IsAiAssisted);
+    }
+
+    [Fact]
+    public async Task Healing_DoesNotAlterRetryClassification()
+    {
+        var h = Create(healingPolicies: EnabledPolicy());
+        var calls = 0;
+        h.Worker.OnGet = (_, _) =>
+        {
+            calls++;
+            if (calls == 1)
+                throw new WorkerInfrastructureException("The Appium worker is unreachable.");
+            if (calls == 2)
+                return Task.FromResult(new MobileAssignmentProgressDto("test", "running", null,
+                    Array.Empty<MobileStepResultDto>(), Array.Empty<MobileLogDto>(), null, "appium-session-1"));
+            return Task.FromResult(TerminalProgress("passed", "unknown",
+                healingAttempts: new[]
+                {
+                    new WorkerHealingAttemptDto(1, "tap", "accessibilityId", "gone",
+                        "resourceId", "com.shop:id/login", "Structural", "Applied", 1, true, false, null),
+                }));
+        };
+
+        var outcome = await h.Coordinator.RunMobileAsync(h.Execution.Id, null, CancellationToken.None);
+
+        // The infrastructure retry stays bounded to one retry; the healed
+        // recovery maps to passed with its attempt record attached.
+        Assert.Equal(ExecutionTestStatus.Passed, outcome.Status);
+        Assert.Equal(2, outcome.Attempt);
+        var mapped = Assert.Single(outcome.HealingAttempts ?? Array.Empty<WorkerHealingAttemptDto>());
+        Assert.Equal("Structural", mapped.HealingStrategy);
     }
 
     // ---------- engine routing + persistence ----------

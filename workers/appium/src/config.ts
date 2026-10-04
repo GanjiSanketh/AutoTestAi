@@ -28,6 +28,12 @@ export interface MobileWorkerConfig {
   executionTimeoutMs: number;
   stepTimeoutMs: number;
   /**
+   * Slice 3C-4C bound for the AI healing-suggest round trip (control plane
+   * resolves the provider). A timeout is a controlled healing failure,
+   * never an infrastructure escalation.
+   */
+  healingAiTimeoutMs: number;
+  /**
    * Slice 3C-4A: worker-local Appium server endpoint reserved for the later
    * Docker/Appium sidecar architecture. Not user-configurable through any
    * project/test/execution API, and not consumed until the execution slice.
@@ -65,6 +71,7 @@ export function loadMobileConfig(): MobileWorkerConfig {
     apiToken: process.env.WORKER_API_TOKEN ?? '',
     executionTimeoutMs: numbered('WORKER_EXECUTION_TIMEOUT_MS', 300000, 10000, 3600000),
     stepTimeoutMs: numbered('WORKER_STEP_TIMEOUT_MS', 30000, 1000, 300000),
+    healingAiTimeoutMs: numbered('SELF_HEALING_AI_TIMEOUT_MS', 15000, 1000, 60000),
     appiumServerUrl: process.env.APPIUM_SERVER_URL ?? 'http://localhost:4723',
   };
 }

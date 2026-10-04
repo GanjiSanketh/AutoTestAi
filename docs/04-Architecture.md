@@ -666,3 +666,40 @@ idempotency unchanged) and upload failures never corrupt the execution
 result. `ClaimToken` remains control-plane-only and `AssignmentToken`
 remains envelope-only; neither enters capabilities or evidence.
 Self-healing, visual regression, video, and iOS runtime remain FUTURE.
+
+## 18.3. Mobile Self-Healing (Phase 3 Slice 3C-4C)
+
+Deterministic-first locator recovery for Android, mirroring the Slice 11
+web engine. When a healable step (`tap`, `inputText`, `clearText`,
+`assertVisible`, `assertText`) fails with a locator-like error and the
+project policy enables healing, the worker attempts exactly one retry with
+a recovered locator before the original failure becomes terminal:
+
+- Candidates come only from deterministic relationships observed in the
+fresh failure page-source snapshot — cross-strategy token matches
+(`accessibilityId` ↔ `resourceId`) and, for `assertText`, expected-text
+anchors. Closed strategy set (`accessibilityId`, `resourceId`, the approved
+mobile locator contract); element text anchors candidates but is never
+emitted as an executable locator. No XPath, CSS, UIAutomator, or predicates.
+- Every candidate must resolve to exactly one enabled, action-compatible
+node (ambiguity rejects), meet the score threshold, and carry no
+executable content. The stored test version is never mutated; the
+recovered locator exists only for the current attempt.
+- `assertText` heals locator recovery only: a text-match mismatch never
+heals, and the expectation is never rewritten. The backend accepts
+`assertText` Applied rows because both workers guarantee this shape;
+mismatch exclusions are enforced worker-side before reporting.
+- Optional AI fallback reuses the existing `healing/suggest` endpoint
+(assignment-token auth, redacted envelope, bounded round trip). AI output
+is untrusted data: schema, closed allowlist, and the same deterministic
+validation apply; `aiAssisted` is true only when an AI-proposed candidate
+drove the successful retry. The worker holds no provider keys.
+- Persisted strategy labels reuse the `SelfHealingStrategy` enum surface
+(`accessibilityId` → `TestAttribute`, `resourceId` → `Structural`,
+AI → `Ai`): no model or migration change. Attempt records flow through
+the shared lease-scoped `RecordAttemptsAsync` path, so fencing,
+idempotency, and healed-step defect rules apply unchanged.
+- Healing never consumes `MaxAttempts`, creates assignments/sessions,
+changes cancellation, or alters action ordering/skip semantics. Policy
+absent/disabled preserves pre-healing behavior exactly (no records, no
+retries). Visual regression, video, and iOS runtime remain FUTURE.

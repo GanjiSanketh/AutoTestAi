@@ -24,7 +24,7 @@ namespace AutoTestAi.Application.SelfHealing;
 public sealed class SelfHealingService : ISelfHealingService
 {
     private static readonly IReadOnlyList<string> DefaultStrategies =
-        new[] { "css", "xpath", "role", "text", "testid" };
+        new[] { "css", "xpath", "role", "text", "testid", "accessibilityid", "resourceid" };
 
     private readonly ISelfHealingPolicyStore _policies;
     private readonly ISelfHealingAttemptStore _attempts;

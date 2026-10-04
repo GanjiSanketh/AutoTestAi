@@ -70,6 +70,25 @@ export interface MobileAssignment {
   timeouts: MobileTimeouts;
   screenshotOnFailure: boolean;
   assignmentToken: string;
+  /** Self-healing policy (Slice 3C-4C). Absent/disabled = pre-healing behavior. */
+  healing?: MobileHealingPolicy | null;
+}
+
+/**
+ * Worker-facing self-healing policy fragment (Slice 3C-4C, mirrors the
+ * Playwright WorkerHealingPolicy shape). Backend-owned, defaults off.
+ */
+export interface MobileHealingPolicy {
+  enabled: boolean;
+  aiFallbackEnabled: boolean;
+  /** Maximum healing retries per failed step. The engine enforces <= 1. */
+  maxAttemptsPerStep: number;
+  /** Optional minimum deterministic candidate score (0-100). Defaults conservative. */
+  minDeterministicScore?: number | null;
+  /** Optional minimum AI confidence (0-1). Advisory only: never overrides validation. */
+  minAiConfidence?: number | null;
+  /** Allowlisted locator strategies. Defaults to the safe mobile set. */
+  allowedStrategies?: string[] | null;
 }
 
 export type MobileStepStatus = 'passed' | 'failed' | 'skipped' | 'error';
@@ -95,6 +114,11 @@ export interface MobileStepResult {
   completedAtUnixMs: number;
   durationMs: number;
   errorMessage?: string | null;
+  /** Slice 3C-4C: the stored target is never mutated; a healed step reports both. */
+  healed?: boolean | null;
+  recoveredTarget?: string | null;
+  healingStrategy?: string | null;
+  aiAssisted?: boolean | null;
 }
 
 export interface MobileLog {
@@ -136,6 +160,22 @@ export interface MobileServerLog {
   textContent: string;
 }
 
+/** Persisted healing outcome for one step (worker → backend, execution-scoped). */
+export interface MobileHealingAttempt {
+  stepOrder: number;
+  stepAction: string;
+  originalStrategy: string | null;
+  originalValue: string | null;
+  recoveredStrategy: string | null;
+  recoveredValue: string | null;
+  healingStrategy: string;
+  status: string;
+  candidateCount: number;
+  wasApplied: boolean;
+  isAiAssisted: boolean;
+  errorMessage: string | null;
+}
+
 export interface MobileResult {
   status: MobileOutcomeStatus;
   classification: MobileClassification;
@@ -147,6 +187,8 @@ export interface MobileResult {
   screenshots: MobileScreenshot[];
   pageSources: MobilePageSource[];
   serverLogs: MobileServerLog[];
+  /** Slice 3C-4C: one outcome record per healed-attempted step (append-only, execution-scoped). */
+  healingAttempts?: MobileHealingAttempt[] | null;
   appiumSessionId?: string | null;
 }
 

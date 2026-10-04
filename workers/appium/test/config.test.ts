@@ -23,4 +23,8 @@ describe('mobile worker config', () => {
       delete process.env.WORKER_CAPACITY;
     }
   });
+
+  it('bounds the healing-suggest round trip', () => {
+    expect(loadMobileConfig().healingAiTimeoutMs).toBe(15000);
+  });
 });

@@ -30,6 +30,7 @@ import {
 } from './driver.js';
 import { isHttpAppUrl, stageAppBinary, type StagedAppBinary } from './appBinary.js';
 import { runMobileActions } from './actions.js';
+import { normalizeMobileHealingPolicy, type MobileHealingEvidenceEnvelope } from './mobileHealing.js';
 import {
   sanitizeServerLogTail,
   type EvidenceSecrets,
@@ -40,6 +41,7 @@ import type {
   MobileAssignment,
   MobileAssignmentProgress,
   MobileAssignmentStatus,
+  MobileHealingAttempt,
   MobileLog,
   MobilePageSource,
   MobileResult,
@@ -179,6 +181,7 @@ export function createMobileWorkerServer(
     let stagedApp: StagedAppBinary | null = null;
     let screenshots: MobileScreenshot[] = [];
     let pageSources: MobilePageSource[] = [];
+    let healingAttempts: MobileHealingAttempt[] = [];
     // Exact-mask material for the log tail: the assignment token and the
     // binary URL must never survive in persisted evidence. Never logged.
     const evidenceSecrets: EvidenceSecrets = {
@@ -219,7 +222,54 @@ export function createMobileWorkerServer(
         screenshots,
         pageSources,
         serverLogs,
+        healingAttempts,
         appiumSessionId: sessionId,
+      };
+    };
+
+    /**
+     * Slice 3C-4C AI fallback: the worker never holds provider keys and never
+     * embeds vendor SDKs. When the assignment policy enables AI fallback, the
+     * redacted evidence envelope is POSTed to the control-plane
+     * healing-suggest endpoint, which resolves the provider server-side.
+     * Auth is the per-assignment lease token (only the live lease holder can
+     * request candidates). Any failure is a controlled healing failure.
+     */
+    const suggestAiFor = (
+      current: MobileAssignment,
+    ): ((envelope: MobileHealingEvidenceEnvelope) => Promise<string>) | undefined => {
+      const policy = normalizeMobileHealingPolicy(current.healing);
+      if (!policy.enabled || !policy.aiFallbackEnabled) return undefined;
+      const baseUrl = (config.apiBaseUrl ?? '').trim().replace(/\/+$/, '');
+      if (!baseUrl) return undefined;
+      const workerAssignmentId = current.assignmentId;
+      const token = current.assignmentToken;
+      return async (envelope) => {
+        const body = JSON.stringify({
+          action: envelope.action,
+          originalTarget: envelope.originalTarget,
+          domFragment: envelope.domFragment.slice(0, 4000),
+          attributes: envelope.attributes.slice(0, 20),
+          nearbyText: envelope.nearbyText.slice(0, 20),
+        });
+        const response = await fetch(
+          `${baseUrl}/api/v1/execution-grid/assignments/${encodeURIComponent(workerAssignmentId)}/healing/suggest`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body,
+            signal: AbortSignal.timeout(config.healingAiTimeoutMs ?? 15000),
+          },
+        );
+        if (!response.ok) {
+          throw new Error(`Healing-suggest endpoint returned HTTP ${response.status}.`);
+        }
+        const payload = (await response.json()) as { candidates?: unknown };
+        // Return the raw contract; the engine schema-validates before use.
+        return JSON.stringify({ candidates: payload.candidates ?? [] });
       };
     };
     const closeSession = async (): Promise<void> => {
@@ -305,10 +355,12 @@ export function createMobileWorkerServer(
         onStepStart: (order) => {
           record.currentStepOrder = order;
         },
+        suggestAi: suggestAiFor(assignment),
       });
       record.stepResults = engineResult.stepResults;
       screenshots = engineResult.screenshots;
       pageSources = engineResult.pageSources;
+      healingAttempts = engineResult.healingAttempts;
       await closeSession();
       if (engineResult.status === 'passed') {
         finish('passed', 'unknown', null, null);

@@ -23,6 +23,7 @@ function config(overrides: Partial<MobileWorkerConfig> = {}): MobileWorkerConfig
     apiToken: 'test-token',
     executionTimeoutMs: 30000,
     stepTimeoutMs: 5000,
+    healingAiTimeoutMs: 15000,
     appiumServerUrl: 'http://localhost:4723',
     ...overrides,
   };
@@ -189,6 +190,7 @@ async function waitForResult(
   errorType: string;
   pageSources?: Array<{ stepOrder: number | null; fileName: string; contentType: string; xmlContent: string }>;
   serverLogs?: Array<{ fileName: string; contentType: string; textContent: string }>;
+  healingAttempts?: Array<{ stepOrder: number; status: string; wasApplied: boolean }>;
 } }> {
   for (let i = 0; i < 50; i += 1) {
     const response = await fetch(`${base}/v1/assignments/${id}`, {
@@ -335,6 +337,30 @@ describe('mobile worker assignment API', () => {
     expect(result.status).toBe('passed');
     expect(result.pageSources ?? []).toHaveLength(0);
     expect(result.serverLogs ?? []).toHaveLength(0);
+  });
+
+  it('reports healing attempts end to end without changing the failure', async () => {
+    const base = await boot(
+      config(),
+      fakeDriver({ failAction: { action: 'tap', error: { kind: 'test', message: 'Cannot tap: element is not interactable (gone)' } } }),
+    );
+    const response = await fetch(`${base}/v1/assignments`, {
+      method: 'POST',
+      headers: authHeaders('test-token'),
+      body: JSON.stringify(
+        assignment({
+          assignmentId: 'heal-1',
+          steps: [{ order: 1, action: 'tap', target: 'accessibilityId=vanished', value: null }],
+          healing: { enabled: true, aiFallbackEnabled: false, maxAttemptsPerStep: 1 },
+        }),
+      ),
+    });
+    expect(response.status).toBe(202);
+    const { result } = await waitForResult(base, 'heal-1');
+    expect(result.status).toBe('failed');
+    expect(result.classification).toBe('test');
+    expect(result.healingAttempts).toHaveLength(1);
+    expect(result.healingAttempts![0]).toMatchObject({ stepOrder: 1, status: 'Failed', wasApplied: false });
   });
 
   it('maps session creation failure to a deterministic error', async () => {

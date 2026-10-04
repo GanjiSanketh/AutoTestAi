@@ -15,6 +15,7 @@ public static partial class SelfHealingEligibility
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "click", "fill", "type", "select", "check", "uncheck", "press", "assertvisible",
+            "tap", "inputtext", "cleartext", "asserttext",
         };
 
     [GeneratedRegex(

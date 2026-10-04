@@ -17,7 +17,7 @@ public static partial class SelfHealingAiValidator
 {
     public static readonly IReadOnlySet<string> AllowedStrategies =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        { "css", "xpath", "role", "text", "testid" };
+        { "css", "xpath", "role", "text", "testid", "accessibilityid", "resourceid" };
 
     [GeneratedRegex(
         """javascript:|<script|eval\s*\(|function\s*\(|child_process|process\.env|require\s*\(|import\s*\(|settimeout\s*\(|setinterval\s*\(|__proto__|constructor""",

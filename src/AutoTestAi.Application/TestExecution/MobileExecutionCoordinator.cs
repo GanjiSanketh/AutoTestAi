@@ -51,6 +51,7 @@ public sealed class MobileExecutionCoordinator : IMobileExecutionCoordinator
     private readonly IDateTimeProvider _clock;
     private readonly IVariableResolutionService? _varResolver;
     private readonly IExecutionVariablesStore? _envelopes;
+    private readonly SelfHealing.ISelfHealingPolicyStore? _healingPolicies;
     private readonly ILogger<MobileExecutionCoordinator> _logger;
 
     public MobileExecutionCoordinator(
@@ -69,7 +70,8 @@ public sealed class MobileExecutionCoordinator : IMobileExecutionCoordinator
         IDateTimeProvider clock,
         ILogger<MobileExecutionCoordinator> logger,
         IVariableResolutionService? varResolver = null,
-        IExecutionVariablesStore? envelopes = null)
+        IExecutionVariablesStore? envelopes = null,
+        SelfHealing.ISelfHealingPolicyStore? healingPolicies = null)
     {
         _store = store;
         _cases = cases;
@@ -86,6 +88,7 @@ public sealed class MobileExecutionCoordinator : IMobileExecutionCoordinator
         _clock = clock;
         _varResolver = varResolver;
         _envelopes = envelopes;
+        _healingPolicies = healingPolicies;
         _logger = logger;
     }
 
@@ -347,6 +350,10 @@ public sealed class MobileExecutionCoordinator : IMobileExecutionCoordinator
                                 status = step.Status,
                                 durationMs = step.DurationMs,
                                 errorMessage = RedactTruncate(step.ErrorMessage, secretValues),
+                                healed = step.Healed,
+                                recoveredTarget = step.RecoveredTarget,
+                                healingStrategy = step.HealingStrategy,
+                                aiAssisted = step.AiAssisted,
                             },
                         }, ct);
             }
@@ -371,11 +378,11 @@ public sealed class MobileExecutionCoordinator : IMobileExecutionCoordinator
                     result.StepResults.Select(s => new WorkerStepResultDto(
                         s.Order, s.Action, s.Target, s.Status,
                         s.StartedAtUnixMs, s.CompletedAtUnixMs, s.DurationMs, s.ErrorMessage,
-                        null, null, null, null)).ToList(),
+                        s.Healed, s.RecoveredTarget, s.HealingStrategy, s.AiAssisted)).ToList(),
                     result.Logs.Select(l => new WorkerLogDto(l.Seq, l.TimestampUnixMs, l.Level, l.Message)).ToList(),
                     result.Screenshots.Select(s => new WorkerScreenshotDto(s.StepOrder, s.FileName, s.ContentType, s.Base64Content)).ToList(),
                     test.Attempt,
-                    null,
+                    result.HealingAttempts,
                     (result.PageSources ?? Array.Empty<MobilePageSourceDto>()).Select(s => new WorkerPageSourceDto(s.StepOrder, s.FileName, s.ContentType, s.XmlContent)).ToList(),
                     (result.ServerLogs ?? Array.Empty<MobileServerLogDto>()).Select(s => new WorkerServerLogDto(s.FileName, s.ContentType, s.TextContent)).ToList()), secretValues);
             }
@@ -521,7 +528,37 @@ public sealed class MobileExecutionCoordinator : IMobileExecutionCoordinator
                 app.InstallPolicy.ToString(), app.LaunchActivity, app.DeepLink, DownloadUrl: downloadUrl),
             capabilities, workerSteps, timeouts,
             ScreenshotOnFailure: true,
-            claim.AssignmentToken), secretValues);
+            claim.AssignmentToken,
+            await ResolveHealingPolicyAsync(execution.ProjectId, ct)), secretValues);
+    }
+
+    /// <summary>
+    /// Slice 3C-4C: the worker-facing healing policy, mirroring the engine's
+    /// Slice 11 resolver. Missing store rows and any lookup failure mean
+    /// disabled — normal steps never pay healing overhead and pre-healing
+    /// behavior is preserved exactly.
+    /// </summary>
+    private async Task<WorkerHealingPolicyDto?> ResolveHealingPolicyAsync(
+        Guid projectId, CancellationToken ct)
+    {
+        if (_healingPolicies is null)
+            return null;
+        try
+        {
+            var row = await _healingPolicies.GetByProjectAsync(projectId, ct);
+            if (row is null || !row.Enabled)
+                return null;
+            return new WorkerHealingPolicyDto(
+                true, row.AiFallbackEnabled, 1,
+                row.MinDeterministicScore, row.MinAiConfidence,
+                SelfHealing.SelfHealingService.ParseStrategies(row.AllowedStrategies));
+        }
+        catch (Exception ex)
+        {
+            // Policy lookup must never fail an execution: heal nothing.
+            _logger.LogWarning(ex, "Self-healing policy lookup failed; healing disabled for this mobile execution.");
+            return null;
+        }
     }
 
     /// <summary>

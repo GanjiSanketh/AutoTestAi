@@ -69,7 +69,8 @@ public sealed record MobileAssignmentDto(
     IReadOnlyList<MobileStepDto> Steps,
     MobileTimeoutsDto Timeouts,
     bool ScreenshotOnFailure,
-    Guid AssignmentToken);
+    Guid AssignmentToken,
+    WorkerHealingPolicyDto? Healing = null);
 
 public sealed record MobileStepResultDto(
     int Order,
@@ -79,7 +80,11 @@ public sealed record MobileStepResultDto(
     long StartedAtUnixMs,
     long CompletedAtUnixMs,
     long DurationMs,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    bool? Healed = null,
+    string? RecoveredTarget = null,
+    string? HealingStrategy = null,
+    bool? AiAssisted = null);
 
 public sealed record MobileLogDto(long Seq, long TimestampUnixMs, string Level, string Message);
 
@@ -114,7 +119,8 @@ public sealed record MobileAssignmentResultDto(
     IReadOnlyList<MobileScreenshotDto> Screenshots,
     string? AppiumSessionId,
     IReadOnlyList<MobilePageSourceDto>? PageSources = null,
-    IReadOnlyList<MobileServerLogDto>? ServerLogs = null);
+    IReadOnlyList<MobileServerLogDto>? ServerLogs = null,
+    IReadOnlyList<WorkerHealingAttemptDto>? HealingAttempts = null);
 
 public sealed record MobileAssignmentProgressDto(
     string AssignmentId,

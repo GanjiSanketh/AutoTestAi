@@ -253,7 +253,7 @@ public sealed class SelfHealingTests
     [InlineData("click", "Timeout waiting for locator '#x'.", true)]
     [InlineData("fill", "Element not found: #user.", true)]
     [InlineData("assertVisible", "Selector no longer matching.", true)]
-    [InlineData("assertText", "Timeout waiting for locator.", false)]
+    [InlineData("assertText", "Timeout waiting for locator.", true)]
     [InlineData("assertValue", "Timeout waiting for locator.", false)]
     [InlineData("navigate", "net::ERR_NAME_NOT_RESOLVED", false)]
     [InlineData("click", "Request failed with HTTP 500.", false)]
@@ -265,6 +265,17 @@ public sealed class SelfHealingTests
     [InlineData("eval", "Timeout.", false)]
     public void Eligibility_MatchesContract(string action, string message, bool expected)
         => Assert.Equal(expected, SelfHealingEligibility.IsHealingEligible(action, message));
+
+    [Fact]
+    public void Eligibility_MobileAssertText_LocatorRecoveryOnly()
+    {
+        // Slice 3C-4C: assertText is healable for locator recovery only.
+        // A locator-like failure may heal; a text-match mismatch never heals.
+        // Both workers enforce the mismatch exclusion before reporting.
+        Assert.True(SelfHealingEligibility.IsHealingEligible("assertText", "Timeout waiting for locator."));
+        Assert.False(SelfHealingEligibility.IsHealingEligible(
+            "assertText", "Step 1 (assertText) failed: text did not match expectation."));
+    }
 
     // ---------- AI validator ----------
 
@@ -297,6 +308,26 @@ public sealed class SelfHealingTests
         var (accepted, _) = SelfHealingAiValidator.Validate(
             result, new[] { "testid" }, 0.5m, 8);
         Assert.Empty(accepted);
+    }
+
+    [Fact]
+    public void AiValidator_AcceptsMobileStrategies_RejectsUnknown()
+    {
+        // Slice 3C-4C: the closed mobile strategy set joins the global
+        // allowlist. Web behavior is unchanged: each worker still enforces
+        // its own closed set before execution.
+        var result = new AiHealingResult("stub", "m", new[]
+        {
+            new AiHealingCandidate("accessibilityId", "Sign in", "stable", 0.9m),
+            new AiHealingCandidate("resourceId", "com.shop:id/login", "stable", null),
+            new AiHealingCandidate("uiautomator", "new UiSelector()", "x", null),
+            new AiHealingCandidate("xpath", "//node", "y", null),
+        });
+        var (accepted, rejected) = SelfHealingAiValidator.Validate(
+            result, new[] { "accessibilityid", "resourceid" }, null, 8);
+        Assert.Equal(2, accepted.Count);
+        Assert.All(accepted, c => Assert.DoesNotContain("uiautomator", c.Strategy));
+        Assert.True(rejected.Count >= 2);
     }
 
     [Fact]
@@ -512,7 +543,7 @@ public sealed class SelfHealingTests
             {
                 Attempt(),
                 Attempt(), // duplicate step → converged, not duplicated
-                Attempt(order: 2, action: "assertText"), // non-healable action → ignored
+                Attempt(order: 2, action: "assertValue"), // non-healable action → ignored
                 Attempt(order: 3, status: "Bogus", applied: false), // bad status → ignored
             }, CancellationToken.None);
         Assert.Equal(1, persisted);
@@ -570,6 +601,43 @@ public sealed class SelfHealingTests
                     "test-attribute", "Failed", 1, false, false, "password=hunter2 boom"),
             }, CancellationToken.None);
         Assert.DoesNotContain("hunter2", attempts.Rows[0].ErrorMessage!);
+    }
+
+    [Fact]
+    public async Task Record_PersistsMobileAttempts_WithParseableStrategyLabels()
+    {
+        // Slice 3C-4C: mobile locator recoveries persist through the shared
+        // lease-scoped path. Strategy labels reuse the persisted enum
+        // surface (no model change): accessibilityId → TestAttribute,
+        // resourceId → Structural, AI → Ai.
+        var (executions, test) = ExecutionFixture();
+        var live = new GridAssignment
+        {
+            ExecutionId = ExecutionA, ExecutionTestId = test.Id,
+            WorkerAssignmentRef = test.Id.ToString("N"),
+            Status = GridAssignmentStatus.Running,
+        };
+        test.StartedAssignmentId = live.Id;
+        var attempts = new FakeAttemptStore();
+        var service = HealingService(new FakePolicyStore(), attempts, executions,
+            new FakeAssignments { Active = live }, new FakeProvider());
+
+        var persisted = await service.RecordAttemptsAsync(ExecutionA, live.Id,
+            new[]
+            {
+                new WorkerHealingAttemptDto(1, "tap", "accessibilityId", "gone",
+                    "resourceId", "com.shop:id/login", "Structural", "Applied", 1, true, false, null),
+                new WorkerHealingAttemptDto(2, "assertText", "accessibilityId", "old",
+                    "accessibilityId", "new", "TestAttribute", "Applied", 1, true, false, null),
+                new WorkerHealingAttemptDto(3, "swipe", "resourceId", "x",
+                    "resourceId", "y", "Structural", "Applied", 1, true, false, null),
+            }, CancellationToken.None);
+
+        Assert.Equal(2, persisted);
+        Assert.Equal(2, attempts.Rows.Count);
+        Assert.Equal(SelfHealingStrategy.Structural, attempts.Rows[0].HealingStrategy);
+        Assert.True(attempts.Rows[0].WasApplied);
+        Assert.Equal(SelfHealingStrategy.TestAttribute, attempts.Rows[1].HealingStrategy);
     }
 
     // ---------- stub provider ----------
