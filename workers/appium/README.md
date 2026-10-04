@@ -37,7 +37,7 @@ execution site.
 
 - No page-source collection beyond bounded failure snapshots, no separate
   Appium server-log pipeline beyond the bounded worker log tail.
-- No self-healing, visual comparison, or video.
+- No visual comparison or video.
 - No iOS runtime, no remote device farms.
 
 ## Security boundary (non-negotiable)
@@ -56,4 +56,7 @@ execution site.
   locator recovery with exactly one validated retry per failed step.
   Closed strategy set (`accessibilityId`, `resourceId`); AI fallback only
   through the control-plane suggest endpoint, validated identically.
+- Visual checkpoints (Slice 3C-4D-1): the `verifyScreenshot` action captures
+  a normal passing screenshot for future baseline comparison. No baseline
+  lookup, no comparison, no verdict logic in the worker.
 - Request bodies are bounded (4MB); logs are bounded (2000 entries).

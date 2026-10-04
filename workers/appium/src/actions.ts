@@ -168,6 +168,36 @@ export async function runMobileActions(deps: ActionEngineDeps): Promise<ActionEn
     }
   };
 
+  /**
+   * Slice 3C-4D-1 checkpoint capture: like evidence capture but throwing.
+   * A verifyScreenshot checkpoint cannot run without its screenshot, so a
+   * failed capture fails the checkpoint (classified like any other driver
+   * failure) instead of degrading to a warning.
+   */
+  const captureCheckpointScreenshot = async (order: number): Promise<void> => {
+    let base64: string;
+    try {
+      base64 = await driver.takeScreenshot(sessionId);
+    } catch (error) {
+      throw {
+        kind: 'environment',
+        message: `Cannot verifyScreenshot: ${truncate((error as InteractionError)?.message ?? 'screenshot capture failed.')}`,
+      };
+    }
+    if (base64.length > MAX_SCREENSHOT_BASE64) {
+      throw {
+        kind: 'environment',
+        message: 'Cannot verifyScreenshot: screenshot exceeded the size bound.',
+      };
+    }
+    screenshots.push({
+      stepOrder: order,
+      fileName: `step-${order}-verify.png`,
+      contentType: 'image/png',
+      base64Content: base64,
+    });
+  };
+
   const capturePageSource = async (order: number): Promise<void> => {
     try {
       const raw = await driver.getPageSource(sessionId);
@@ -227,7 +257,7 @@ export async function runMobileActions(deps: ActionEngineDeps): Promise<ActionEn
     const healedStep: MobileStep = { ...step, target: recoveredTarget };
     try {
       throwIfAborted();
-      await runStep(driver, sessionId, assignment, healedStep, stepTimeoutMs, signal, captureScreenshot);
+      await runStep(driver, sessionId, assignment, healedStep, stepTimeoutMs, signal, captureScreenshot, captureCheckpointScreenshot);
     } catch (retryError) {
       // Cancellation during the heal retry stays cancellation; any other
       // retry failure keeps the ORIGINAL failure authoritative.
@@ -334,7 +364,7 @@ export async function runMobileActions(deps: ActionEngineDeps): Promise<ActionEn
     pushLog('info', `step ${step.order} (${step.action}) started`);
     try {
       throwIfAborted();
-      await runStep(driver, sessionId, assignment, step, stepTimeoutMs, signal, captureScreenshot);
+      await runStep(driver, sessionId, assignment, step, stepTimeoutMs, signal, captureScreenshot, captureCheckpointScreenshot);
       const completedAt = Date.now();
       stepResults.push({
         order: step.order,
@@ -420,6 +450,7 @@ async function runStep(
   stepTimeoutMs: number,
   signal: AbortSignal,
   captureScreenshot: (order: number | null, suffix: string) => Promise<void>,
+  captureCheckpoint: (order: number) => Promise<void>,
 ): Promise<void> {
   switch (step.action) {
     case 'launchApp': {
@@ -493,6 +524,15 @@ async function runStep(
     }
     case 'screenshot': {
       await captureScreenshot(step.order, 'explicit');
+      return;
+    }
+    case 'verifyScreenshot': {
+      // Slice 3C-4D-1: opt-in visual checkpoint. Capture-only in this
+      // slice: a normal passing explicit screenshot artifact. Unlike the
+      // evidence `screenshot` action (best-effort), a failed capture fails
+      // the checkpoint itself — the check could not run. No baseline
+      // lookup, no comparison, no verdict logic (owned by 3C-4D-2).
+      await captureCheckpoint(step.order);
       return;
     }
     case 'terminateApp': {

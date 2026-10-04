@@ -65,6 +65,7 @@ public static class DependencyInjection
             services.AddScoped<Application.Webhooks.IWebhookDeliveryStore, Webhooks.EfWebhookDeliveryStore>();
             services.AddScoped<Application.Webhooks.ISuiteMemberLookup, Webhooks.EfSuiteMemberLookup>();
             services.AddScoped<Application.Mobile.IMobileRegistryStore, Mobile.EfMobileRegistryStore>();
+            services.AddScoped<Application.Mobile.IVisualBaselineStore, Mobile.EfVisualBaselineStore>();
             // Slice 3A: one vault class, two narrow capabilities. Execution
             // code resolves ISecretResolver; management resolves ISecretStore.
             services.AddScoped<EfSecretVault>();
@@ -97,6 +98,7 @@ public static class DependencyInjection
             services.AddSingleton<Application.Webhooks.IWebhookDeliveryStore, Webhooks.UnavailableWebhookDeliveryStore>();
             services.AddSingleton<Application.Webhooks.ISuiteMemberLookup, Webhooks.UnavailableSuiteMemberLookup>();
             services.AddSingleton<Application.Mobile.IMobileRegistryStore, Mobile.UnavailableMobileRegistryStore>();
+            services.AddSingleton<Application.Mobile.IVisualBaselineStore, Mobile.UnavailableVisualBaselineStore>();
             services.AddSingleton<ISecretResolver, Secrets.UnavailableSecretResolver>();
             services.AddSingleton<ISecretStore, Secrets.UnavailableSecretStore>();
         }

@@ -294,3 +294,17 @@ public enum SelfHealingStrategy
     Structural = 5,
     Ai = 6
 }
+
+/// <summary>
+/// Lifecycle state for a visual baseline reference image (Phase 3 Slice
+/// 3C-4D-1). Candidate rows await explicit approval; exactly one Active
+/// row exists per test-case version and step; approving a candidate
+/// demotes the previous Active row to Superseded (history, never deleted
+/// by the service; rejected candidates are removed).
+/// </summary>
+public enum VisualBaselineStatus
+{
+    Candidate = 0,
+    Active = 1,
+    Superseded = 2
+}

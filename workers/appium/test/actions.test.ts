@@ -130,6 +130,7 @@ describe('mobile action dispatch', () => {
     ['hideKeyboard', {}],
     ['wait', { value: '50' }],
     ['screenshot', {}],
+    ['verifyScreenshot', {}],
     ['terminateApp', {}],
   ])('executes %s and reports passed', async (action, step) => {
     const { deps: d } = deps(fakeDriver(), { steps: steps([{ action, ...step }]) });
@@ -375,6 +376,32 @@ describe('mobile action dispatch', () => {
     expect(result.screenshots).toHaveLength(1);
     expect(result.screenshots[0]).toMatchObject({ stepOrder: 2, contentType: 'image/png' });
     expect(result.screenshots[0]!.base64Content.length).toBeGreaterThan(0);
+  });
+
+  it('verifyScreenshot captures a normal passing screenshot with no comparison', async () => {
+    const result = await runMobileActions(
+      deps(fakeDriver(), { steps: steps([{ action: 'verifyScreenshot' }]) }).deps,
+    );
+    expect(result.status).toBe('passed');
+    expect(result.errorMessage).toBeNull();
+    expect(result.stepResults[0]).toMatchObject({ status: 'passed' });
+    expect(result.screenshots).toHaveLength(1);
+    expect(result.screenshots[0]).toMatchObject({ stepOrder: 1, contentType: 'image/png' });
+    expect(result.screenshots[0]!.fileName).toBe('step-1-verify.png');
+    expect(result.screenshots[0]!.base64Content.length).toBeGreaterThan(0);
+    expect(result.healingAttempts).toHaveLength(0);
+  });
+
+  it('verifyScreenshot capture failure is a normal action failure', async () => {
+    const result = await runMobileActions(
+      deps(
+        fakeDriver({ 'screenshot-capture': { kind: 'environment', message: 'invalid session id' } }),
+        { steps: steps([{ action: 'verifyScreenshot' }]) },
+      ).deps,
+    );
+    expect(result.status).toBe('error');
+    expect(result.classification).toBe('environment');
+    expect(result.screenshots).toHaveLength(0);
   });
 
   it('never logs secret values', async () => {

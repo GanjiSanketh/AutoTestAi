@@ -239,6 +239,7 @@ app.MapDashboardEndpoints();
 app.MapExecutionGridEndpoints();
 app.MapWebhookEndpoints();
 app.MapMobileEndpoints();
+app.MapVisualBaselineEndpoints();
 app.MapHub<ExecutionHub>("/hubs/execution");
 
 if (!authOptions.Configured)

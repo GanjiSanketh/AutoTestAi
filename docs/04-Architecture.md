@@ -703,3 +703,38 @@ idempotency, and healed-step defect rules apply unchanged.
 changes cancellation, or alters action ordering/skip semantics. Policy
 absent/disabled preserves pre-healing behavior exactly (no records, no
 retries). Visual regression, video, and iOS runtime remain FUTURE.
+
+## 18.4. Mobile Visual Baselines (Phase 3 Slice 3C-4D-1)
+
+Project-scoped reference images for future visual comparison, managed
+explicitly — execution never consults them in this slice:
+
+- New closed action `verifyScreenshot`: capture-only checkpoint. Records a
+normal passing explicit screenshot artifact (`step-{order}-verify.png`);
+fails only when capture itself fails. Ordinary `screenshot` semantics are
+unchanged, failure screenshots never invoke verification, and tests
+without the action behave exactly as before.
+- `visual_baselines` table (`ProjectId`, `TestCaseId`,
+`TestCaseVersionId`, `StepOrder`, `Status`, server-generated `StorageKey`,
+`Sha256`, dimensions, nullable `MismatchThresholdBps`, actor/timestamp
+audit columns). Exactly one `Active` row per (version, step) via a
+filtered unique index plus service-level enforcement; history rows are
+never repurposed.
+- Lifecycle `Candidate → Active → Superseded` with explicit approval only
+(`settings.manage`, audited `visual.baseline_*`); rejected candidates are
+removed; an Active baseline is never deleted; no automatic replacement.
+Candidate creation is idempotent on (version, step, sha256). Reads require
+`executions.read`; all rows are project-scoped with `NotFound` (never
+`Forbidden` for members) on scope mismatch, mirroring registry
+conventions; platform admins bypass membership per the documented rule.
+- Bytes travel caller → `IArtifactStorage` under
+`projects/{project}/visual-baselines/...` (same bucket, no new
+abstraction); review uses short-lived presigned URLs (900 s) that are
+never logged or persisted. Reference uploads validate PNG shape and
+bounds server-side.
+- Comparison is intentionally NOT implemented: no baseline lookup during
+execution, no pixel diff, no verdict logic, no `visual-diff` artifacts
+(owned by 3C-4D-2, which will also introduce the image-processing
+dependency). Pixel-embedded secrets cannot be scrubbed by text redaction;
+access control plus guidance against baselining secret-bearing screens is
+the control. Video, iOS, and Playwright comparison remain FUTURE.

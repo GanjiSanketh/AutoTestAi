@@ -41,6 +41,7 @@ public sealed class AutoTestAiDbContext : DbContext
     public DbSet<AutoTicketPolicy> AutoTicketPolicies => Set<AutoTicketPolicy>();
     public DbSet<SelfHealingPolicy> SelfHealingPolicies => Set<SelfHealingPolicy>();
     public DbSet<SelfHealingAttempt> SelfHealingAttempts => Set<SelfHealingAttempt>();
+    public DbSet<VisualBaseline> VisualBaselines => Set<VisualBaseline>();
     public DbSet<VariableSet> VariableSets => Set<VariableSet>();
     public DbSet<EnvironmentSecret> EnvironmentSecrets => Set<EnvironmentSecret>();
     public DbSet<ExecutionVariables> ExecutionVariables => Set<ExecutionVariables>();
@@ -249,6 +250,22 @@ public sealed class AutoTestAiDbContext : DbContext
         modelBuilder.Entity<SelfHealingAttempt>().Property(a => a.OriginalStrategy).HasMaxLength(50);
         modelBuilder.Entity<SelfHealingAttempt>().Property(a => a.RecoveredStrategy).HasMaxLength(50);
         modelBuilder.Entity<SelfHealingAttempt>().Property(a => a.ErrorMessage).HasMaxLength(2000);
+
+        // --- visual baselines (Phase 3 Slice 3C-4D-1, additive) ---
+        modelBuilder.Entity<VisualBaseline>().ToTable("visual_baselines");
+        modelBuilder.Entity<VisualBaseline>().HasIndex(b => b.ProjectId);
+        modelBuilder.Entity<VisualBaseline>().HasIndex(b => b.TestCaseVersionId);
+        // Exactly one active baseline per (test-case version, step):
+        // concurrent approvals collide here; the service additionally
+        // enforces the invariant for stores without partial-index support.
+        modelBuilder.Entity<VisualBaseline>()
+            .HasIndex(b => new { b.TestCaseVersionId, b.StepOrder })
+            .IsUnique()
+            .HasFilter("\"Status\" = 'Active'");
+        modelBuilder.Entity<VisualBaseline>().Property(b => b.Status).HasConversion<string>();
+        modelBuilder.Entity<VisualBaseline>().Property(b => b.StorageKey).HasMaxLength(500);
+        modelBuilder.Entity<VisualBaseline>().Property(b => b.Sha256).HasMaxLength(64);
+        modelBuilder.Entity<VisualBaseline>().Property(b => b.ContentType).HasMaxLength(100);
 
         ApplyInMemoryJsonCompatibility(modelBuilder);
 

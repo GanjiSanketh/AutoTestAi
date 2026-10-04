@@ -223,4 +223,8 @@ export const MOBILE_ACTIONS = new Set([
   'wait',
   'screenshot',
   'terminateApp',
+  // Slice 3C-4D-1: opt-in visual checkpoint. Capture-only: the worker
+  // records a normal passing screenshot artifact. No baseline lookup, no
+  // comparison, no verdict logic in the worker (3C-4D-2 owns comparison).
+  'verifyScreenshot',
 ]);
