@@ -2,6 +2,21 @@ namespace AutoTestAi.Application.TestExecution;
 
 // ---------- mobile worker protocol DTOs (mirror workers/appium contract) ----------
 
+/// <summary>
+/// Hard bounds for Slice 3C-4B-3 mobile failure evidence. The worker
+/// enforces these before returning results; the control plane re-enforces
+/// them in <c>SanitizeOutcome</c> so a worker/control-plane skew can never
+/// persist unbounded evidence.
+/// </summary>
+public static class MobileEvidenceBounds
+{
+    /// <summary>Maximum persisted page-source snapshot size (chars, XML text).</summary>
+    public const int MaxPageSourceChars = 1024 * 1024;
+
+    /// <summary>Maximum persisted worker log-tail size (chars, most-recent tail).</summary>
+    public const int MaxServerLogChars = 256 * 1024;
+}
+
 /// <summary>Single mobile step handed to the worker. Shape mirrors TestStep; values pre-redacted when password-like.</summary>
 public sealed record MobileStepDto(int Order, string Action, string? Target, string? Value);
 
@@ -70,6 +85,23 @@ public sealed record MobileLogDto(long Seq, long TimestampUnixMs, string Level, 
 
 public sealed record MobileScreenshotDto(int? StepOrder, string FileName, string ContentType, string Base64Content);
 
+/// <summary>
+/// Bounded, redacted page-source snapshot (Slice 3C-4B-3). Captured
+/// best-effort at the worker failure evidence point only. XmlContent is
+/// already secret-masked, heuristically redacted, and hard-bounded to
+/// 1 MB before it enters the result. Never carries tokens, credentials,
+/// or URLs.
+/// </summary>
+public sealed record MobilePageSourceDto(int? StepOrder, string FileName, string ContentType, string XmlContent);
+
+/// <summary>
+/// Bounded, redacted worker log tail (Slice 3C-4B-3). Serialized from the
+/// assignment's in-memory log ring at terminal time, most-recent tail
+/// only, hard-bounded to 256 KB. Attached to non-passed results as
+/// failure evidence.
+/// </summary>
+public sealed record MobileServerLogDto(string FileName, string ContentType, string TextContent);
+
 public sealed record MobileAssignmentResultDto(
     string AssignmentId,
     string Status,
@@ -80,7 +112,9 @@ public sealed record MobileAssignmentResultDto(
     IReadOnlyList<MobileStepResultDto> StepResults,
     IReadOnlyList<MobileLogDto> Logs,
     IReadOnlyList<MobileScreenshotDto> Screenshots,
-    string? AppiumSessionId);
+    string? AppiumSessionId,
+    IReadOnlyList<MobilePageSourceDto>? PageSources = null,
+    IReadOnlyList<MobileServerLogDto>? ServerLogs = null);
 
 public sealed record MobileAssignmentProgressDto(
     string AssignmentId,

@@ -374,7 +374,10 @@ public sealed class MobileExecutionCoordinator : IMobileExecutionCoordinator
                         null, null, null, null)).ToList(),
                     result.Logs.Select(l => new WorkerLogDto(l.Seq, l.TimestampUnixMs, l.Level, l.Message)).ToList(),
                     result.Screenshots.Select(s => new WorkerScreenshotDto(s.StepOrder, s.FileName, s.ContentType, s.Base64Content)).ToList(),
-                    test.Attempt), secretValues);
+                    test.Attempt,
+                    null,
+                    (result.PageSources ?? Array.Empty<MobilePageSourceDto>()).Select(s => new WorkerPageSourceDto(s.StepOrder, s.FileName, s.ContentType, s.XmlContent)).ToList(),
+                    (result.ServerLogs ?? Array.Empty<MobileServerLogDto>()).Select(s => new WorkerServerLogDto(s.FileName, s.ContentType, s.TextContent)).ToList()), secretValues);
             }
 
             await Task.Delay(TimeSpan.FromSeconds(_execution.Value.WorkerPollIntervalSeconds), ct);
@@ -656,15 +659,39 @@ public sealed class MobileExecutionCoordinator : IMobileExecutionCoordinator
                 outcome.DurationMs,
                 outcome.Steps.Select(s => s with { ErrorMessage = RedactTruncate(s.ErrorMessage) }).ToList(),
                 outcome.Logs.Select(l => l with { Message = RedactTruncate(l.Message) ?? string.Empty }).ToList(),
-                outcome.Screenshots, outcome.Attempt, outcome.HealingAttempts);
+                outcome.Screenshots, outcome.Attempt, outcome.HealingAttempts,
+                SanitizeEvidence(outcome, null), SanitizeServerLogs(outcome, null));
         return new WorkerExecutionOutcome(
             outcome.Status, outcome.Classification, outcome.ErrorType,
             RedactTruncate(outcome.ErrorMessage, secretValues),
             outcome.DurationMs,
             outcome.Steps.Select(s => s with { ErrorMessage = RedactTruncate(s.ErrorMessage, secretValues) }).ToList(),
             outcome.Logs.Select(l => l with { Message = RedactTruncate(l.Message, secretValues) ?? string.Empty }).ToList(),
-            outcome.Screenshots, outcome.Attempt, outcome.HealingAttempts);
+            outcome.Screenshots, outcome.Attempt, outcome.HealingAttempts,
+            SanitizeEvidence(outcome, secretValues), SanitizeServerLogs(outcome, secretValues));
     }
+
+    /// <summary>
+    /// Slice 3C-4B-3: defense-in-depth re-masking of worker evidence text
+    /// (mirrors the engine). Bounds are re-enforced; entries are truncated,
+    /// never persisted unbounded.
+    /// </summary>
+    private static IReadOnlyList<WorkerPageSourceDto> SanitizeEvidence(
+        WorkerExecutionOutcome outcome, IReadOnlyList<string>? secretValues)
+        => (outcome.PageSources ?? Array.Empty<WorkerPageSourceDto>()).Select(s => s with
+        {
+            XmlContent = BoundEvidence(RedactTruncate(s.XmlContent, secretValues) ?? string.Empty, MobileEvidenceBounds.MaxPageSourceChars),
+        }).ToList();
+
+    private static IReadOnlyList<WorkerServerLogDto> SanitizeServerLogs(
+        WorkerExecutionOutcome outcome, IReadOnlyList<string>? secretValues)
+        => (outcome.ServerLogs ?? Array.Empty<WorkerServerLogDto>()).Select(s => s with
+        {
+            TextContent = BoundEvidence(RedactTruncate(s.TextContent, secretValues) ?? string.Empty, MobileEvidenceBounds.MaxServerLogChars),
+        }).ToList();
+
+    private static string BoundEvidence(string value, int maxChars)
+        => value.Length <= maxChars ? value : value[..maxChars];
 
     private static string Truncate(string? value)
         => string.IsNullOrEmpty(value) ? string.Empty

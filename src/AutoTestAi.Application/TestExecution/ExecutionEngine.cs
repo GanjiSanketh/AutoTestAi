@@ -40,7 +40,9 @@ public sealed record WorkerExecutionOutcome(
     IReadOnlyList<WorkerLogDto> Logs,
     IReadOnlyList<WorkerScreenshotDto> Screenshots,
     int Attempt,
-    IReadOnlyList<WorkerHealingAttemptDto>? HealingAttempts = null);
+    IReadOnlyList<WorkerHealingAttemptDto>? HealingAttempts = null,
+    IReadOnlyList<WorkerPageSourceDto>? PageSources = null,
+    IReadOnlyList<WorkerServerLogDto>? ServerLogs = null);
 
 /// <summary>
 /// Workflow-facing execution engine (Slice 5 §10-11). Temporal activities are
@@ -425,6 +427,10 @@ public sealed class ExecutionEngine : IExecutionEngine
 
         await PersistScreenshotsAsync(execution, test, outcome, ct);
 
+        // Slice 3C-4B-3: mobile failure evidence through the same fenced,
+        // best-effort artifact path. No new tables, endpoints, or storage.
+        await PersistMobileEvidenceAsync(execution, test, outcome, ct);
+
         // Slice 11: persist worker-reported healing outcomes (fenced). Healing
         // never mutates the bound test version; history keeps original targets.
         await RecordHealingAttemptsAsync(execution, test, outcome, ct);
@@ -807,15 +813,42 @@ public sealed class ExecutionEngine : IExecutionEngine
                 outcome.DurationMs,
                 outcome.Steps.Select(s => s with { ErrorMessage = RedactTruncate(s.ErrorMessage) }).ToList(),
                 outcome.Logs.Select(l => l with { Message = RedactTruncate(l.Message) ?? string.Empty }).ToList(),
-                outcome.Screenshots, outcome.Attempt, outcome.HealingAttempts);
+                outcome.Screenshots, outcome.Attempt, outcome.HealingAttempts,
+                SanitizeEvidence(outcome, null), SanitizeServerLogs(outcome, null));
         return new WorkerExecutionOutcome(
             outcome.Status, outcome.Classification, outcome.ErrorType,
             RedactTruncate(outcome.ErrorMessage, secretValues),
             outcome.DurationMs,
             outcome.Steps.Select(s => s with { ErrorMessage = RedactTruncate(s.ErrorMessage, secretValues) }).ToList(),
             outcome.Logs.Select(l => l with { Message = RedactTruncate(l.Message, secretValues) ?? string.Empty }).ToList(),
-            outcome.Screenshots, outcome.Attempt, outcome.HealingAttempts);
+            outcome.Screenshots, outcome.Attempt, outcome.HealingAttempts,
+            SanitizeEvidence(outcome, secretValues), SanitizeServerLogs(outcome, secretValues));
     }
+
+    /// <summary>
+    /// Slice 3C-4B-3: defense-in-depth re-masking of worker evidence text.
+    /// The worker already redacts and bounds page sources; the coordinator
+    /// re-applies exact secret masking here so a worker/control-plane skew
+    /// can never leak a known secret into Temporal history or persistence.
+    /// Bounds are re-enforced; oversized entries are truncated, never dropped
+    /// silently into an unbounded store.
+    /// </summary>
+    private static IReadOnlyList<WorkerPageSourceDto> SanitizeEvidence(
+        WorkerExecutionOutcome outcome, IReadOnlyList<string>? secretValues)
+        => (outcome.PageSources ?? Array.Empty<WorkerPageSourceDto>()).Select(s => s with
+        {
+            XmlContent = BoundEvidence(RedactTruncate(s.XmlContent, secretValues) ?? string.Empty, MobileEvidenceBounds.MaxPageSourceChars),
+        }).ToList();
+
+    private static IReadOnlyList<WorkerServerLogDto> SanitizeServerLogs(
+        WorkerExecutionOutcome outcome, IReadOnlyList<string>? secretValues)
+        => (outcome.ServerLogs ?? Array.Empty<WorkerServerLogDto>()).Select(s => s with
+        {
+            TextContent = BoundEvidence(RedactTruncate(s.TextContent, secretValues) ?? string.Empty, MobileEvidenceBounds.MaxServerLogChars),
+        }).ToList();
+
+    private static string BoundEvidence(string value, int maxChars)
+        => value.Length <= maxChars ? value : value[..maxChars];
 
     /// <summary>
     /// Slice 11: the worker-facing healing policy. Missing store rows and any
@@ -882,6 +915,84 @@ public sealed class ExecutionEngine : IExecutionEngine
                 // Artifact upload must never fail the execution result itself (§60.7).
                 _logger.LogWarning(ex, "Screenshot upload failed for execution {ExecutionId}.", execution.Id);
             }
+        }
+    }
+
+    /// <summary>
+    /// Slice 3C-4B-3: persists bounded mobile failure evidence (page-source
+    /// snapshots, worker log tails) through the existing artifact
+    /// infrastructure. Runs inside the same fenced <c>PersistResultAsync</c>
+    /// path as screenshots, so StartedAssignmentId fencing and idempotency
+    /// apply unchanged. Content arrives already redacted and bounded from
+    /// the worker/coordinator; bounds are re-checked here and oversized
+    /// entries are skipped with a warning. Upload failures never corrupt
+    /// the execution result.
+    /// </summary>
+    private async Task PersistMobileEvidenceAsync(
+        Execution execution, ExecutionTest test, WorkerExecutionOutcome outcome, CancellationToken ct)
+    {
+        var sources = outcome.PageSources ?? Array.Empty<WorkerPageSourceDto>();
+        var logs = outcome.ServerLogs ?? Array.Empty<WorkerServerLogDto>();
+        if (sources.Count == 0 && logs.Count == 0) return;
+        if (!_artifacts.IsConfigured)
+        {
+            _logger.LogWarning("Artifact storage is not configured; {Count} mobile evidence artifact(s) for execution {ExecutionId} were not stored.",
+                sources.Count + logs.Count, execution.Id);
+            return;
+        }
+        foreach (var source in sources)
+        {
+            var xml = source.XmlContent ?? string.Empty;
+            if (xml.Length > MobileEvidenceBounds.MaxPageSourceChars)
+            {
+                _logger.LogWarning("Oversized page-source evidence for execution {ExecutionId} was not stored.", execution.Id);
+                continue;
+            }
+            await PersistTextEvidenceAsync(execution, test,
+                "page-source", "text/xml", source.StepOrder, source.FileName, xml, ct);
+        }
+        foreach (var log in logs)
+        {
+            var text = log.TextContent ?? string.Empty;
+            if (text.Length > MobileEvidenceBounds.MaxServerLogChars)
+            {
+                _logger.LogWarning("Oversized server-log evidence for execution {ExecutionId} was not stored.", execution.Id);
+                continue;
+            }
+            await PersistTextEvidenceAsync(execution, test,
+                "appium-log", "text/plain", null, log.FileName, text, ct);
+        }
+    }
+
+    private async Task PersistTextEvidenceAsync(
+        Execution execution, ExecutionTest test,
+        string artifactType, string contentType,
+        int? stepOrder, string? fileName, string text, CancellationToken ct)
+    {
+        try
+        {
+            var slug = Slug(fileName);
+            var order = stepOrder is null ? "finish" : $"step-{stepOrder.Value:000}";
+            var key = $"projects/{execution.ProjectId}/executions/{execution.Id}/tests/{test.Id}/{order}-{slug}";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(text);
+            using var stream = new MemoryStream(bytes, writable: false);
+            await _artifacts.UploadAsync(key, stream, contentType, ct);
+            await _store.AddArtifactAsync(new ExecutionArtifact
+            {
+                ExecutionTestId = test.Id,
+                ArtifactType = artifactType,
+                StorageKey = key,
+                FileName = fileName,
+                StepOrder = stepOrder,
+                ContentType = contentType,
+                SizeBytes = bytes.Length,
+                CreatedAt = _clock.UtcNow,
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            // Artifact upload must never fail the execution result itself (§60.7).
+            _logger.LogWarning(ex, "Mobile evidence upload failed for execution {ExecutionId}.", execution.Id);
         }
     }
 

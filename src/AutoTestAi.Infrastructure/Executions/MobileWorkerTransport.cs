@@ -172,6 +172,19 @@ public sealed class MobileWorkerTransport
                 s.TryGetProperty("contentType", out var ctp) && ctp.ValueKind == JsonValueKind.String ? ctp.GetString() ?? "image/png" : "image/png",
                 s.TryGetProperty("base64Content", out var b64) && b64.ValueKind == JsonValueKind.String ? b64.GetString() ?? string.Empty : string.Empty)).ToList()
             : new List<MobileScreenshotDto>();
+        var sources = root.TryGetProperty("pageSources", out var sourcesEl) && sourcesEl.ValueKind == JsonValueKind.Array
+            ? sourcesEl.EnumerateArray().Select(s => new MobilePageSourceDto(
+                s.TryGetProperty("stepOrder", out var so) && so.ValueKind == JsonValueKind.Number && so.TryGetInt32(out var n) ? n : null,
+                s.TryGetProperty("fileName", out var fn) && fn.ValueKind == JsonValueKind.String ? fn.GetString() ?? "pagesource.xml" : "pagesource.xml",
+                s.TryGetProperty("contentType", out var ctp) && ctp.ValueKind == JsonValueKind.String ? ctp.GetString() ?? "text/xml" : "text/xml",
+                s.TryGetProperty("xmlContent", out var xml) && xml.ValueKind == JsonValueKind.String ? xml.GetString() ?? string.Empty : string.Empty)).ToList()
+            : new List<MobilePageSourceDto>();
+        var serverLogs = root.TryGetProperty("serverLogs", out var serverLogsEl) && serverLogsEl.ValueKind == JsonValueKind.Array
+            ? serverLogsEl.EnumerateArray().Select(s => new MobileServerLogDto(
+                s.TryGetProperty("fileName", out var fn) && fn.ValueKind == JsonValueKind.String ? fn.GetString() ?? "appium.log" : "appium.log",
+                s.TryGetProperty("contentType", out var ctp) && ctp.ValueKind == JsonValueKind.String ? ctp.GetString() ?? "text/plain" : "text/plain",
+                s.TryGetProperty("textContent", out var text) && text.ValueKind == JsonValueKind.String ? text.GetString() ?? string.Empty : string.Empty)).ToList()
+            : new List<MobileServerLogDto>();
         var sessionId = root.TryGetProperty("appiumSessionId", out var sess) && sess.ValueKind == JsonValueKind.String
             ? sess.GetString() : null;
         return new MobileAssignmentResultDto(
@@ -181,7 +194,7 @@ public sealed class MobileWorkerTransport
             Str(root, "errorType"),
             Str(root, "errorMessage"),
             Long(root, "durationMs"),
-            steps, logs, shots, sessionId);
+            steps, logs, shots, sessionId, sources, serverLogs);
     }
 
     private static MobileStepResultDto ParseStep(JsonElement s) => new(

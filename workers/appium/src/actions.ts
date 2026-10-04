@@ -11,10 +11,12 @@
  * are NEVER logged. Logs carry order/action/outcome only.
  */
 import type { IMobileDriver, InteractionError, SwipeDirection } from './driver.js';
+import { sanitizePageSource, type EvidenceSecrets } from './evidence.js';
 import { parseMobileTarget, type ResolvedMobileLocator } from './locators.js';
 import type {
   MobileAssignment,
   MobileLog,
+  MobilePageSource,
   MobileScreenshot,
   MobileStep,
   MobileStepResult,
@@ -25,6 +27,8 @@ export type ActionFailureKind = 'test' | 'environment' | 'automation';
 export interface ActionEngineResult {
   stepResults: MobileStepResult[];
   screenshots: MobileScreenshot[];
+  /** Bounded, redacted page-source snapshots (failure evidence only). */
+  pageSources: MobilePageSource[];
   /** Terminal status for the run: never 'passed' unless every step completed. */
   status: 'passed' | 'failed' | 'error';
   classification: 'test' | 'environment' | 'automation';
@@ -109,6 +113,14 @@ export async function runMobileActions(deps: ActionEngineDeps): Promise<ActionEn
   const steps = [...assignment.steps].sort((a, b) => a.order - b.order);
   const stepResults: MobileStepResult[] = [];
   const screenshots: MobileScreenshot[] = [];
+  const pageSources: MobilePageSource[] = [];
+  // Exact-mask material for evidence: values typed through text-entry
+  // steps plus the assignment token and binary URL. Never logged.
+  const evidenceSecrets: EvidenceSecrets = {
+    assignmentToken: assignment.assignmentToken,
+    downloadUrl: assignment.app.downloadUrl,
+    typedValues: steps.map((s) => s.value),
+  };
 
   const captureScreenshot = async (order: number | null, suffix: string): Promise<void> => {
     try {
@@ -125,6 +137,23 @@ export async function runMobileActions(deps: ActionEngineDeps): Promise<ActionEn
       });
     } catch (error) {
       pushLog('warning', `screenshot capture failed: ${(error as InteractionError)?.message?.slice(0, 200) ?? 'unknown'}`);
+    }
+  };
+
+  const capturePageSource = async (order: number): Promise<void> => {
+    try {
+      const raw = await driver.getPageSource(sessionId);
+      const sanitized = sanitizePageSource(raw, order, evidenceSecrets);
+      pageSources.push({
+        stepOrder: order,
+        fileName: sanitized.fileName,
+        contentType: 'text/xml',
+        xmlContent: sanitized.xmlContent,
+      });
+    } catch (error) {
+      // Best-effort evidence: a failed snapshot must never change the
+      // primary failure or escalate to an infrastructure retry.
+      pushLog('warning', `page source capture failed: ${(error as InteractionError)?.message?.slice(0, 200) ?? 'unknown'}`);
     }
   };
 
@@ -170,6 +199,9 @@ export async function runMobileActions(deps: ActionEngineDeps): Promise<ActionEn
       pushLog('error', `step ${step.order} (${step.action}) failed`);
       if (assignment.screenshotOnFailure) {
         await captureScreenshot(step.order, 'failure');
+        // Failure-evidence gate (shared with screenshots): a bounded,
+        // redacted page-source snapshot for the failing step.
+        await capturePageSource(step.order);
       }
       // Skip everything after the terminal failure; never execute further.
       for (const remaining of steps) {
@@ -188,6 +220,7 @@ export async function runMobileActions(deps: ActionEngineDeps): Promise<ActionEn
       return {
         stepResults,
         screenshots,
+        pageSources,
         status: failure.kind === 'test' ? 'failed' : 'error',
         classification: failure.kind,
         errorType: failure.kind === 'test' ? 'AssertionError' : 'StepError',
@@ -199,6 +232,7 @@ export async function runMobileActions(deps: ActionEngineDeps): Promise<ActionEn
   return {
     stepResults,
     screenshots,
+    pageSources,
     status: 'passed',
     classification: 'test',
     errorType: null,

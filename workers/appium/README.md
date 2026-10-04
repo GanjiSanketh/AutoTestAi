@@ -1,4 +1,4 @@
-# Appium Worker (Slice 3C-4B-1 runtime)
+# Appium Worker (Slices 3C-4B-1 through 3C-4B-3 runtime)
 
 Isolated mobile-execution worker for AutoTest AI (docs/04, ADR-008).
 The API never executes test code; this container is the only mobile
@@ -20,7 +20,10 @@ execution site.
   worker-local `APPIUM_SERVER_URL` (validated at startup, never from the
   assignment).
 - Holds a controlled "session established" state after creation until
-  cancellation, timeout, or shutdown. Steps are validated but NOT executed.
+  cancellation, timeout, or shutdown, then executes the closed 12-action
+  set in order (tap/input/assert/swipe/back/keyboard/wait/screenshot/
+  terminateApp), stopping after the first terminal failure. Never reports
+  success for work not performed.
 - Maps failures deterministically: unreachable/timeout/device-absent to
   `environment`, capability/shape problems to `automation`, abort to
   `cancelled`. Never reports success for work not performed.
@@ -32,9 +35,8 @@ execution site.
 
 ## What it explicitly does NOT do yet
 
-- No step execution (tap/input/assert/swipe/back/keyboard/wait/screenshot/
-  terminateApp all deferred to the action-engine slice).
-- No screenshot, page-source, or Appium-log collection.
+- No page-source collection beyond bounded failure snapshots, no separate
+  Appium server-log pipeline beyond the bounded worker log tail.
 - No self-healing, visual comparison, or video.
 - No iOS runtime, no remote device farms.
 
@@ -47,4 +49,7 @@ execution site.
   (`accessibilityId=`, `resourceId=`). Bare targets are rejected.
 - Unknown actions and missing locators fail as automation failures.
 - Password-like values travel and persist as `[REDACTED]`.
+- Failure evidence (page-source snapshots, log tails) is exact-masked,
+  heuristically redacted, and hard-bounded (1 MB / 256 KB tail) before it
+  enters any result; raw evidence is never logged or persisted.
 - Request bodies are bounded (4MB); logs are bounded (2000 entries).

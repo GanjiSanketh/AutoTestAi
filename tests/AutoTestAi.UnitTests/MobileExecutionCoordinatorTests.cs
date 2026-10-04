@@ -189,10 +189,21 @@ public sealed class MobileExecutionCoordinatorTests
     private sealed class FakeArtifacts : IArtifactStorage
     {
         public bool IsConfigured { get; set; } = true;
+        public bool ThrowOnUpload { get; set; }
         public readonly List<string> UploadedKeys = new();
+        public readonly List<string> UploadedContentTypes = new();
+        public readonly List<byte[]> UploadedBodies = new();
         public string PresignedUrl { get; set; } = "https://artifacts.example/mobile-apps/shop.apk?exp=900";
         public Task UploadAsync(string key, Stream content, string contentType, CancellationToken ct)
-        { UploadedKeys.Add(key); return Task.CompletedTask; }
+        {
+            if (ThrowOnUpload) throw new InvalidOperationException("Storage is down.");
+            UploadedKeys.Add(key);
+            UploadedContentTypes.Add(contentType);
+            using var ms = new MemoryStream();
+            content.CopyTo(ms);
+            UploadedBodies.Add(ms.ToArray());
+            return Task.CompletedTask;
+        }
         public Task<string> GetPresignedDownloadUrlAsync(string key, int expirySeconds, CancellationToken ct)
             => Task.FromResult(PresignedUrl);
         public Task<bool> CheckConnectivityAsync(CancellationToken ct) => Task.FromResult(true);
@@ -368,7 +379,9 @@ public sealed class MobileExecutionCoordinatorTests
     private static MobileAssignmentProgressDto TerminalProgress(
         string status, string? classification, string? errorMessage = null,
         IReadOnlyList<MobileScreenshotDto>? screenshots = null,
-        IReadOnlyList<MobileStepResultDto>? steps = null)
+        IReadOnlyList<MobileStepResultDto>? steps = null,
+        IReadOnlyList<MobilePageSourceDto>? pageSources = null,
+        IReadOnlyList<MobileServerLogDto>? serverLogs = null)
         => new("test", status, 1,
             steps ?? new[] { new MobileStepResultDto(1, "launchApp", null, "passed", 1, 2, 1, null) },
             Array.Empty<MobileLogDto>(),
@@ -376,7 +389,8 @@ public sealed class MobileExecutionCoordinatorTests
                 errorMessage, 5,
                 steps ?? new[] { new MobileStepResultDto(1, "launchApp", null, "passed", 1, 2, 1, null) },
                 Array.Empty<MobileLogDto>(),
-                screenshots ?? Array.Empty<MobileScreenshotDto>(), "appium-session-1"),
+                screenshots ?? Array.Empty<MobileScreenshotDto>(), "appium-session-1",
+                pageSources, serverLogs),
             "appium-session-1");
 
     private static void ScriptTerminal(Harness h, MobileAssignmentProgressDto terminal)
@@ -623,6 +637,268 @@ public sealed class MobileExecutionCoordinatorTests
             Assert.DoesNotContain(url, log.Message);
         Assert.DoesNotContain("mobile-apps/shop.apk", outcome.ErrorMessage ?? string.Empty);
         Assert.Null(typeof(MobileAssignmentDto).GetProperty("ClaimToken"));
+    }
+
+    // ---------- Slice 3C-4B-3: failure evidence ----------
+
+    [Fact]
+    public async Task FailedRun_MapsEvidenceIntoOutcome()
+    {
+        var h = Create();
+        var source = new MobilePageSourceDto(1, "step-1-pagesource.xml", "text/xml",
+            "<hierarchy><node text=\"ok\" /></hierarchy>");
+        var log = new MobileServerLogDto("appium.log", "text/plain", "[1 info] worker accepted assignment");
+        ScriptTerminal(h, TerminalProgress("failed", "test", "Step 1 (tap) failed",
+            pageSources: new[] { source }, serverLogs: new[] { log }));
+
+        var outcome = await h.Coordinator.RunMobileAsync(h.Execution.Id, null, CancellationToken.None);
+
+        Assert.Equal(ExecutionTestStatus.Failed, outcome.Status);
+        var mapped = Assert.Single(outcome.PageSources ?? Array.Empty<WorkerPageSourceDto>());
+        Assert.Equal("step-1-pagesource.xml", mapped.FileName);
+        Assert.Equal("text/xml", mapped.ContentType);
+        Assert.Contains("ok", mapped.XmlContent);
+        var mappedLog = Assert.Single(outcome.ServerLogs ?? Array.Empty<WorkerServerLogDto>());
+        Assert.Equal("appium.log", mappedLog.FileName);
+        Assert.Equal("text/plain", mappedLog.ContentType);
+    }
+
+    [Fact]
+    public async Task Evidence_SanitizedWithSecrets_NoTokenOrUrlLeak()
+    {
+        var h = Create();
+        var token = h.Test.AssignmentToken?.ToString() ?? "assignment-token-value";
+        var url = h.Artifacts.PresignedUrl;
+        var envelopes = new FakeEnvelopes { EnvironmentId = Guid.NewGuid() };
+        var resolver = new FakeVarResolver
+        {
+            Resolved = new ResolvedVariables(
+                new Dictionary<string, string>(),
+                new[] { "hunter2-secret", token, url }, Array.Empty<string>(),
+                new HashSet<string>()),
+        };
+        var coordinator = new MobileExecutionCoordinator(
+            h.Store, h.Cases, h.Mobile, h.Scheduler, h.Assignments,
+            new MobileSessionService(h.Mobile, h.Assignments, new SystemDateTimeProvider(),
+                NullLogger<MobileSessionService>.Instance),
+            h.Worker, h.Events, h.Artifacts,
+            Options.Create(new ExecutionOptions { WorkerPollIntervalSeconds = 0 }),
+            Options.Create(new GridOptions()),
+            new MobileCapabilityBuilder(Options.Create(new MobileOptions())),
+            new SystemDateTimeProvider(),
+            NullLogger<MobileExecutionCoordinator>.Instance,
+            resolver, envelopes);
+        var source = new MobilePageSourceDto(1, "step-1-pagesource.xml", "text/xml",
+            $"<hierarchy><node text=\"hunter2-secret\" /><node id=\"{token}\" /><link href=\"{url}\" /></hierarchy>");
+        var log = new MobileServerLogDto("appium.log", "text/plain",
+            $"token {token} url {url} secret hunter2-secret");
+        ScriptTerminal(h, TerminalProgress("failed", "test", "Step 1 (tap) failed",
+            pageSources: new[] { source }, serverLogs: new[] { log }));
+
+        var outcome = await coordinator.RunMobileAsync(h.Execution.Id, null, CancellationToken.None);
+
+        Assert.Equal(ExecutionTestStatus.Failed, outcome.Status);
+        var mapped = Assert.Single(outcome.PageSources ?? Array.Empty<WorkerPageSourceDto>());
+        Assert.DoesNotContain("hunter2-secret", mapped.XmlContent);
+        Assert.DoesNotContain(token, mapped.XmlContent);
+        Assert.DoesNotContain(url, mapped.XmlContent);
+        Assert.DoesNotContain("artifacts.example", mapped.XmlContent);
+        var mappedLog = Assert.Single(outcome.ServerLogs ?? Array.Empty<WorkerServerLogDto>());
+        Assert.DoesNotContain("hunter2-secret", mappedLog.TextContent);
+        Assert.DoesNotContain(token, mappedLog.TextContent);
+        Assert.DoesNotContain(url, mappedLog.TextContent);
+    }
+
+    [Fact]
+    public async Task Evidence_DoesNotAlterRetryClassification()
+    {
+        var h = Create();
+        var source = new MobilePageSourceDto(1, "step-1-pagesource.xml", "text/xml", "<hierarchy/>");
+        var calls = 0;
+        h.Worker.OnGet = (_, _) =>
+        {
+            calls++;
+            if (calls == 1)
+                throw new WorkerInfrastructureException("The Appium worker is unreachable.");
+            if (calls == 2)
+                return Task.FromResult(new MobileAssignmentProgressDto("test", "running", null,
+                    Array.Empty<MobileStepResultDto>(), Array.Empty<MobileLogDto>(), null, "appium-session-1"));
+            return Task.FromResult(TerminalProgress("failed", "test", "Step 1 (tap) failed",
+                pageSources: new[] { source }));
+        };
+
+        var outcome = await h.Coordinator.RunMobileAsync(h.Execution.Id, null, CancellationToken.None);
+
+        // Infrastructure retry still bounded to one retry; the terminal
+        // assertion failure maps to test failure with evidence attached.
+        Assert.Equal(ExecutionTestStatus.Failed, outcome.Status);
+        Assert.Equal(FailureClassification.TestFailure, outcome.Classification);
+        Assert.Equal(2, outcome.Attempt);
+        Assert.Single(outcome.PageSources ?? Array.Empty<WorkerPageSourceDto>());
+    }
+
+    [Fact]
+    public void Transport_RoundTrip_ParsesEvidenceCollections()
+    {
+        var json = """
+            {"assignmentId":"test","status":"failed","currentStepOrder":1,
+             "stepResults":[],"logs":[],
+             "result":{"assignmentId":"test","status":"failed","classification":"test",
+              "errorType":"AssertionError","errorMessage":"Step 1 failed","durationMs":5,
+              "stepResults":[],"logs":[],"screenshots":[],
+              "pageSources":[{"stepOrder":1,"fileName":"step-1-pagesource.xml","contentType":"text/xml","xmlContent":"<hierarchy/>"}],
+              "serverLogs":[{"fileName":"appium.log","contentType":"text/plain","textContent":"[1 info] tail"}],
+              "appiumSessionId":"s"},"appiumSessionId":"s"}
+            """;
+        using var doc = JsonDocument.Parse(json);
+        var progress = AutoTestAi.Infrastructure.Executions.MobileWorkerTransport.ParseProgress(doc.RootElement);
+
+        Assert.Equal("failed", progress.Status);
+        var source = Assert.Single(progress.Result!.PageSources ?? Array.Empty<MobilePageSourceDto>());
+        Assert.Equal("step-1-pagesource.xml", source.FileName);
+        Assert.Equal("<hierarchy/>", source.XmlContent);
+        var log = Assert.Single(progress.Result!.ServerLogs ?? Array.Empty<MobileServerLogDto>());
+        Assert.Equal("appium.log", log.FileName);
+        Assert.Equal("[1 info] tail", log.TextContent);
+    }
+
+    [Fact]
+    public async Task PersistResult_Evidence_PersistAsArtifacts()
+    {
+        var store = new FakeExecutionStore();
+        var artifacts = new FakeArtifacts();
+        var engine = new ExecutionEngine(
+            store, new FakeCases(), new FakeWebWorker(), new FakeEvents(), artifacts,
+            Options.Create(new ExecutionOptions()),
+            new SystemDateTimeProvider(), new FakeAudit(),
+            NullLogger<ExecutionEngine>.Instance);
+        var execution = new Execution { ProjectId = ProjectA, Status = ExecutionStatus.Running };
+        var test = new ExecutionTest
+        {
+            ExecutionId = execution.Id, TestCaseId = Guid.NewGuid(),
+            Status = ExecutionTestStatus.Running, Framework = "appium", Attempt = 1,
+        };
+        store.Executions.Add(execution);
+        store.Tests.Add(test);
+        var outcome = new WorkerExecutionOutcome(
+            ExecutionTestStatus.Failed, FailureClassification.TestFailure, "AssertionError", "Step 1 failed", 5,
+            new[] { new WorkerStepResultDto(1, "tap", "accessibilityId=x", "failed", 1, 2, 1, "gone") },
+            Array.Empty<WorkerLogDto>(),
+            Array.Empty<WorkerScreenshotDto>(),
+            1,
+            null,
+            new[] { new WorkerPageSourceDto(1, "step-1-pagesource.xml", "text/xml", "<hierarchy/>") },
+            new[] { new WorkerServerLogDto("appium.log", "text/plain", "[1 info] tail") });
+
+        await engine.PersistResultAsync(execution.Id, outcome, CancellationToken.None);
+
+        Assert.Equal(2, store.Artifacts.Count);
+        var source = store.Artifacts.Single(a => a.ArtifactType == "page-source");
+        Assert.Equal("text/xml", source.ContentType);
+        Assert.Equal(1, source.StepOrder);
+        Assert.Contains("step-001-step-1-pagesource.xml", source.StorageKey);
+        var log = store.Artifacts.Single(a => a.ArtifactType == "appium-log");
+        Assert.Equal("text/plain", log.ContentType);
+        Assert.Contains("finish-appium.log", log.StorageKey);
+        Assert.Equal(2, artifacts.UploadedKeys.Count);
+        Assert.Contains(artifacts.UploadedContentTypes, c => c == "text/xml");
+        Assert.Contains(artifacts.UploadedContentTypes, c => c == "text/plain");
+        Assert.Contains("<hierarchy/>", System.Text.Encoding.UTF8.GetString(artifacts.UploadedBodies[0]));
+    }
+
+    [Fact]
+    public async Task PersistResult_OversizedEvidence_Skipped_WithoutCorruptingResult()
+    {
+        var store = new FakeExecutionStore();
+        var artifacts = new FakeArtifacts();
+        var engine = new ExecutionEngine(
+            store, new FakeCases(), new FakeWebWorker(), new FakeEvents(), artifacts,
+            Options.Create(new ExecutionOptions()),
+            new SystemDateTimeProvider(), new FakeAudit(),
+            NullLogger<ExecutionEngine>.Instance);
+        var execution = new Execution { ProjectId = ProjectA, Status = ExecutionStatus.Running };
+        var test = new ExecutionTest
+        {
+            ExecutionId = execution.Id, TestCaseId = Guid.NewGuid(),
+            Status = ExecutionTestStatus.Running, Framework = "appium", Attempt = 1,
+        };
+        store.Executions.Add(execution);
+        store.Tests.Add(test);
+        var outcome = new WorkerExecutionOutcome(
+            ExecutionTestStatus.Failed, FailureClassification.TestFailure, "AssertionError", "Step 1 failed", 5,
+            Array.Empty<WorkerStepResultDto>(), Array.Empty<WorkerLogDto>(), Array.Empty<WorkerScreenshotDto>(), 1,
+            null,
+            new[] { new WorkerPageSourceDto(1, "step-1-pagesource.xml", "text/xml", new string('x', MobileEvidenceBounds.MaxPageSourceChars + 1)) },
+            new[] { new WorkerServerLogDto("appium.log", "text/plain", new string('y', MobileEvidenceBounds.MaxServerLogChars + 1)) });
+
+        await engine.PersistResultAsync(execution.Id, outcome, CancellationToken.None);
+
+        Assert.Empty(store.Artifacts);
+        Assert.Empty(artifacts.UploadedKeys);
+        Assert.Equal(ExecutionTestStatus.Failed, test.Status);
+    }
+
+    [Fact]
+    public async Task PersistResult_EvidenceUploadFailure_DoesNotCorruptResult()
+    {
+        var store = new FakeExecutionStore();
+        var artifacts = new FakeArtifacts { ThrowOnUpload = true };
+        var engine = new ExecutionEngine(
+            store, new FakeCases(), new FakeWebWorker(), new FakeEvents(), artifacts,
+            Options.Create(new ExecutionOptions()),
+            new SystemDateTimeProvider(), new FakeAudit(),
+            NullLogger<ExecutionEngine>.Instance);
+        var execution = new Execution { ProjectId = ProjectA, Status = ExecutionStatus.Running };
+        var test = new ExecutionTest
+        {
+            ExecutionId = execution.Id, TestCaseId = Guid.NewGuid(),
+            Status = ExecutionTestStatus.Running, Framework = "appium", Attempt = 1,
+        };
+        store.Executions.Add(execution);
+        store.Tests.Add(test);
+        var outcome = new WorkerExecutionOutcome(
+            ExecutionTestStatus.Failed, FailureClassification.TestFailure, "AssertionError", "Step 1 failed", 5,
+            Array.Empty<WorkerStepResultDto>(), Array.Empty<WorkerLogDto>(), Array.Empty<WorkerScreenshotDto>(), 1,
+            null,
+            new[] { new WorkerPageSourceDto(1, "step-1-pagesource.xml", "text/xml", "<hierarchy/>") },
+            null);
+
+        await engine.PersistResultAsync(execution.Id, outcome, CancellationToken.None);
+
+        Assert.Equal(ExecutionTestStatus.Failed, test.Status);
+        Assert.Empty(store.Artifacts);
+    }
+
+    [Fact]
+    public async Task PersistResult_Evidence_IsIdempotent()
+    {
+        var store = new FakeExecutionStore();
+        var artifacts = new FakeArtifacts();
+        var engine = new ExecutionEngine(
+            store, new FakeCases(), new FakeWebWorker(), new FakeEvents(), artifacts,
+            Options.Create(new ExecutionOptions()),
+            new SystemDateTimeProvider(), new FakeAudit(),
+            NullLogger<ExecutionEngine>.Instance);
+        var execution = new Execution { ProjectId = ProjectA, Status = ExecutionStatus.Running };
+        var test = new ExecutionTest
+        {
+            ExecutionId = execution.Id, TestCaseId = Guid.NewGuid(),
+            Status = ExecutionTestStatus.Running, Framework = "appium", Attempt = 1,
+        };
+        store.Executions.Add(execution);
+        store.Tests.Add(test);
+        var outcome = new WorkerExecutionOutcome(
+            ExecutionTestStatus.Failed, FailureClassification.TestFailure, "AssertionError", "Step 1 failed", 5,
+            Array.Empty<WorkerStepResultDto>(), Array.Empty<WorkerLogDto>(), Array.Empty<WorkerScreenshotDto>(), 1,
+            null,
+            new[] { new WorkerPageSourceDto(1, "step-1-pagesource.xml", "text/xml", "<hierarchy/>") },
+            null);
+
+        await engine.PersistResultAsync(execution.Id, outcome, CancellationToken.None);
+        await engine.PersistResultAsync(execution.Id, outcome, CancellationToken.None);
+
+        Assert.Single(store.Artifacts);
+        Assert.Single(artifacts.UploadedKeys);
     }
 
     [Fact]

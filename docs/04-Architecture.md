@@ -629,3 +629,40 @@ no new public endpoint); cleanup is idempotent and ownership-scoped. No
 schema changes were required. Mobile action execution, screenshots, page
 source, Appium logs, self-healing, visual regression, video, and iOS runtime
 remain FUTURE.
+
+## 18.2. Mobile Failure Evidence (Phase 3 Slice 3C-4B-3)
+
+Failed mobile runs attach bounded, redacted failure evidence that flows
+through the existing artifact infrastructure — no new tables, endpoints,
+storage abstractions, or migrations:
+
+- Page-source snapshots (`text/xml`, artifact type `page-source`): captured
+best-effort at the step-failure evidence point behind the same gate as
+screenshots, via a narrow `IMobileDriver.getPageSource` addition
+(Android-gated, same classification semantics as screenshots, no
+`executeScript`). Snapshot filename `step-{order}-pagesource.xml`.
+- Worker log tail (artifact type `appium-log`, `text/plain`, filename
+`appium.log`): serialized from the assignment's own bounded in-memory log
+ring at terminal time, most-recent tail only, attached to non-passed
+results.
+
+Required sanitization order — raw evidence → exact known-secret masking
+(assignment token, presigned download URL, typed step values) → heuristic
+redaction (bearer credentials, password shapes, signature query parameters)
+→ hard size bound (page source: head 1 MB; server logs: most-recent 256 KB
+tail). Raw evidence is never logged, never thrown, never persisted, and
+never placed in artifact metadata; only deterministic filenames
+(no user input, secrets, tokens, or URLs) enter metadata. The worker
+enforces masking, redaction, and bounds; the coordinator re-applies exact
+secret masking plus bounds in `SanitizeOutcome`, and persistence re-checks
+bounds, skipping oversized entries with a warning.
+
+Reliability: evidence capture is best-effort and capture failures log a
+bounded warning only — they never create retryable infrastructure failures,
+never consume `MaxAttempts`, never change test/environment classification,
+and never prevent terminal persistence. Persistence runs inside the existing
+fenced `PersistResultAsync` path (`StartedAssignmentId` fencing and
+idempotency unchanged) and upload failures never corrupt the execution
+result. `ClaimToken` remains control-plane-only and `AssignmentToken`
+remains envelope-only; neither enters capabilities or evidence.
+Self-healing, visual regression, video, and iOS runtime remain FUTURE.

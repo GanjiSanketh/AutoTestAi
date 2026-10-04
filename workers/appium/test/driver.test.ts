@@ -111,6 +111,13 @@ describe('driver session handle tracking', () => {
     expect(driver.hasSession('no-such-session')).toBe(false);
   });
 
+  it('getPageSource fails closed with environment classification without a session', async () => {
+    const driver = new WebdriverIoDriver();
+    await expect(driver.getPageSource('no-such-session')).rejects.toMatchObject({
+      kind: 'environment',
+    });
+  });
+
   it('createSession fails deterministically with environment classification when unreachable', async () => {
     const driver = new WebdriverIoDriver();
     await expect(

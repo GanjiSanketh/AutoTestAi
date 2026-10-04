@@ -140,6 +140,10 @@ function fakeDriver(options?: {
       maybeFail('screenshot');
       return options?.screenshotBase64 ?? Buffer.from('fake-png').toString('base64');
     },
+    async getPageSource(): Promise<string> {
+      maybeFail('pagesource');
+      return '<hierarchy><node text="fake" /></hierarchy>';
+    },
     async activateApp(): Promise<void> {
       maybeFail('launchApp');
     },
@@ -179,7 +183,13 @@ function authHeaders(token: string): Record<string, string> {
 async function waitForResult(
   base: string,
   id: string,
-): Promise<{ result: { status: string; classification: string; errorType: string } }> {
+): Promise<{ result: {
+  status: string;
+  classification: string;
+  errorType: string;
+  pageSources?: Array<{ stepOrder: number | null; fileName: string; contentType: string; xmlContent: string }>;
+  serverLogs?: Array<{ fileName: string; contentType: string; textContent: string }>;
+} }> {
   for (let i = 0; i < 50; i += 1) {
     const response = await fetch(`${base}/v1/assignments/${id}`, {
       headers: authHeaders('test-token'),
@@ -283,6 +293,48 @@ describe('mobile worker assignment API', () => {
     expect(result.status).toBe('failed');
     expect(result.classification).toBe('test');
     expect(result.status).not.toBe('passed');
+  });
+
+  it('attaches bounded page-source and log-tail evidence to failed results', async () => {
+    const base = await boot(
+      config(),
+      fakeDriver({ failAction: { action: 'launchApp', error: { kind: 'test', message: 'element is not interactable' } } }),
+    );
+    const response = await fetch(`${base}/v1/assignments`, {
+      method: 'POST',
+      headers: authHeaders('test-token'),
+      body: JSON.stringify(assignment({ assignmentId: 'evidence-1' })),
+    });
+    expect(response.status).toBe(202);
+    const { result } = await waitForResult(base, 'evidence-1');
+    expect(result.status).toBe('failed');
+    expect(result.pageSources).toHaveLength(1);
+    expect(result.pageSources![0]).toMatchObject({
+      stepOrder: 1,
+      fileName: 'step-1-pagesource.xml',
+      contentType: 'text/xml',
+    });
+    expect(result.pageSources![0]!.xmlContent.length).toBeGreaterThan(0);
+    expect(result.serverLogs).toHaveLength(1);
+    expect(result.serverLogs![0]).toMatchObject({ fileName: 'appium.log', contentType: 'text/plain' });
+    expect(result.serverLogs![0]!.textContent.length).toBeGreaterThan(0);
+    // The assignment token authenticates the API but must never survive
+    // in persisted evidence.
+    expect(JSON.stringify(result)).not.toContain('token-1');
+  });
+
+  it('passed results carry no failure evidence', async () => {
+    const base = await boot(config(), fakeDriver());
+    const response = await fetch(`${base}/v1/assignments`, {
+      method: 'POST',
+      headers: authHeaders('test-token'),
+      body: JSON.stringify(assignment({ assignmentId: 'evidence-pass-1' })),
+    });
+    expect(response.status).toBe(202);
+    const { result } = await waitForResult(base, 'evidence-pass-1');
+    expect(result.status).toBe('passed');
+    expect(result.pageSources ?? []).toHaveLength(0);
+    expect(result.serverLogs ?? []).toHaveLength(0);
   });
 
   it('maps session creation failure to a deterministic error', async () => {

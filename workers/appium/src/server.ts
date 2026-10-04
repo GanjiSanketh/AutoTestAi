@@ -13,6 +13,11 @@
  * session (Android-first) and returns passed/failed/error/cancelled/timedOut
  * results with screenshots. Steps are validated at the boundary; unsupported
  * actions never execute. No shell, no eval, no dynamic code loading.
+ *
+ * Slice 3C-4B-3 adds bounded failure evidence: redacted page-source
+ * snapshots and the redacted worker log tail, persisted as artifacts
+ * downstream. Evidence is best-effort and bounded; capture failures never
+ * escalate to infrastructure retries.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
@@ -25,6 +30,10 @@ import {
 } from './driver.js';
 import { isHttpAppUrl, stageAppBinary, type StagedAppBinary } from './appBinary.js';
 import { runMobileActions } from './actions.js';
+import {
+  sanitizeServerLogTail,
+  type EvidenceSecrets,
+} from './evidence.js';
 import { redactStepValue } from './redaction.js';
 import { validateMobileSteps } from './steps.js';
 import type {
@@ -32,8 +41,10 @@ import type {
   MobileAssignmentProgress,
   MobileAssignmentStatus,
   MobileLog,
+  MobilePageSource,
   MobileResult,
   MobileScreenshot,
+  MobileServerLog,
   MobileStepResult,
 } from './types.js';
 
@@ -167,6 +178,14 @@ export function createMobileWorkerServer(
     let sessionId: string | null = null;
     let stagedApp: StagedAppBinary | null = null;
     let screenshots: MobileScreenshot[] = [];
+    let pageSources: MobilePageSource[] = [];
+    // Exact-mask material for the log tail: the assignment token and the
+    // binary URL must never survive in persisted evidence. Never logged.
+    const evidenceSecrets: EvidenceSecrets = {
+      assignmentToken: assignment.assignmentToken,
+      downloadUrl: assignment.app.downloadUrl,
+      typedValues: assignment.steps.map((s) => s.value),
+    };
     const finish = (
       status: MobileResult['status'],
       classification: MobileResult['classification'],
@@ -174,6 +193,21 @@ export function createMobileWorkerServer(
       errorMessage: string | null,
     ): void => {
       record.status = status;
+      // Failure-evidence tail (Slice 3C-4B-3): the redacted, most-recent
+      // 256 KB of this assignment's own log ring, attached to non-passed
+      // terminal results only. Best-effort; never throws.
+      let serverLogs: MobileServerLog[] = [];
+      if (status !== 'passed' && record.logs.length > 0) {
+        const tail = sanitizeServerLogTail(
+          record.logs.map((l) => `[${l.timestampUnixMs} ${l.level}] ${l.message}`),
+          evidenceSecrets,
+        );
+        serverLogs = [{
+          fileName: tail.fileName,
+          contentType: 'text/plain',
+          textContent: tail.textContent,
+        }];
+      }
       record.result = {
         status,
         classification,
@@ -183,6 +217,8 @@ export function createMobileWorkerServer(
         stepResults: record.stepResults,
         logs: record.logs,
         screenshots,
+        pageSources,
+        serverLogs,
         appiumSessionId: sessionId,
       };
     };
@@ -272,6 +308,7 @@ export function createMobileWorkerServer(
       });
       record.stepResults = engineResult.stepResults;
       screenshots = engineResult.screenshots;
+      pageSources = engineResult.pageSources;
       await closeSession();
       if (engineResult.status === 'passed') {
         finish('passed', 'unknown', null, null);

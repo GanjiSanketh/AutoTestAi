@@ -1,5 +1,5 @@
 /**
- * Mobile worker execution protocol (Slices 3C-4A through 3C-4B-2).
+ * Mobile worker execution protocol (Slices 3C-4A through 3C-4B-3).
  * Mirrors the C# contract (IMobileWorkerClient DTOs). JSON over HTTP,
  * camelCase throughout. The worker receives structured steps and
  * server-built capabilities only — never credentials, provider keys,
@@ -9,6 +9,11 @@
  * session (Android-first) and reports passed/failed/error/cancelled/
  * timedOut results with screenshots. It never reports success for work
  * it did not perform.
+ *
+ * Slice 3C-4B-3 adds bounded failure evidence: redacted page-source
+ * snapshots (text/xml) and the redacted worker log tail (text/plain).
+ * Evidence is best-effort and bounded; capture failures never escalate
+ * to infrastructure retries.
  */
 
 export interface MobileStep {
@@ -106,6 +111,31 @@ export interface MobileScreenshot {
   base64Content: string;
 }
 
+/**
+ * Bounded, redacted page-source snapshot (Slice 3C-4B-3). Captured
+ * best-effort at the failure evidence point only; xmlContent is already
+ * secret-masked, heuristically redacted, and hard-bounded to 1 MB before
+ * it enters the result. Never carries tokens, credentials, or URLs.
+ */
+export interface MobilePageSource {
+  stepOrder?: number | null;
+  fileName: string;
+  contentType: string;
+  xmlContent: string;
+}
+
+/**
+ * Bounded, redacted worker log tail (Slice 3C-4B-3). Serialized from the
+ * assignment's in-memory log ring at terminal time, most-recent tail only,
+ * hard-bounded to 256 KB. Attached to non-passed results as failure
+ * evidence; never carries raw secrets, tokens, or presigned URLs.
+ */
+export interface MobileServerLog {
+  fileName: string;
+  contentType: string;
+  textContent: string;
+}
+
 export interface MobileResult {
   status: MobileOutcomeStatus;
   classification: MobileClassification;
@@ -115,6 +145,8 @@ export interface MobileResult {
   stepResults: MobileStepResult[];
   logs: MobileLog[];
   screenshots: MobileScreenshot[];
+  pageSources: MobilePageSource[];
+  serverLogs: MobileServerLog[];
   appiumSessionId?: string | null;
 }
 

@@ -83,6 +83,7 @@ function fakeDriver(script: FakeScript = {}, calls: string[] = []): IMobileDrive
     },
     hideKeyboard: async () => probe('hideKeyboard', 'closed' as const),
     takeScreenshot: async () => probe('screenshot-capture', Buffer.from('png-bytes').toString('base64')),
+    getPageSource: async () => probe('pagesource-capture', '<hierarchy><node text="fake" /></hierarchy>'),
     activateApp: async () => {
       await probe('launchApp', undefined);
     },
@@ -268,7 +269,7 @@ describe('mobile action dispatch', () => {
         ]),
       }).deps,
     );
-    expect(calls).toEqual(['launchApp', 'assertVisible', 'screenshot-capture']);
+    expect(calls).toEqual(['launchApp', 'assertVisible', 'screenshot-capture', 'pagesource-capture']);
     expect(result.stepResults.map((s) => `${s.order}:${s.status}`)).toEqual([
       '1:passed',
       '2:failed',
@@ -287,6 +288,69 @@ describe('mobile action dispatch', () => {
     );
     controller.abort();
     await expect(pending).rejects.toThrow(/cancelled via api/i);
+  });
+
+  it('captures a redacted page source on failure without values in the artifact', async () => {
+    const result = await runMobileActions(
+      deps(
+        fakeDriver({ assertVisible: false, 'pagesource-capture': '<hierarchy><node text="hunter2-secret" /></hierarchy>' }),
+        {
+          steps: steps([
+            { action: 'inputText', target: 'resourceId=com.shop:id/password', value: 'hunter2-secret' },
+            { action: 'assertVisible', target: 'accessibilityId=missing' },
+          ]),
+        },
+      ).deps,
+    );
+    expect(result.status).toBe('failed');
+    // inputText passed first, so the typed secret is exact-masked in the snapshot.
+    expect(result.pageSources).toHaveLength(1);
+    expect(result.pageSources[0]).toMatchObject({ stepOrder: 2, contentType: 'text/xml' });
+    expect(result.pageSources[0]!.fileName).toBe('step-2-pagesource.xml');
+    expect(result.pageSources[0]!.xmlContent).not.toContain('hunter2-secret');
+    expect(JSON.stringify(result)).not.toContain('hunter2-secret');
+  });
+
+  it('masks the assignment token in page-source evidence', async () => {
+    const result = await runMobileActions(
+      deps(
+        fakeDriver({ assertVisible: false, 'pagesource-capture': 'session token-1 established <hierarchy/>' }),
+        { steps: steps([{ action: 'assertVisible', target: 'accessibilityId=missing' }]) },
+      ).deps,
+    );
+    expect(result.status).toBe('failed');
+    expect(result.pageSources).toHaveLength(1);
+    expect(result.pageSources[0]!.xmlContent).not.toContain('token-1');
+    expect(JSON.stringify(result)).not.toContain('token-1');
+  });
+
+  it('page source capture failure keeps the primary failure and never retries', async () => {
+    const logged: string[] = [];
+    const { deps: d } = deps(
+      fakeDriver({ assertVisible: false, 'pagesource-capture': { kind: 'environment', message: 'invalid session id' } }),
+      { steps: steps([{ action: 'assertVisible', target: 'accessibilityId=missing' }]) },
+    );
+    const withLogs: ActionEngineDeps = {
+      ...d,
+      pushLog: (level, message) => {
+        logged.push(message);
+        d.pushLog(level, message);
+      },
+    };
+    const result = await runMobileActions(withLogs);
+    expect(result.status).toBe('failed');
+    expect(result.classification).toBe('test');
+    expect(result.errorType).toBe('AssertionError');
+    expect(result.pageSources).toHaveLength(0);
+    expect(logged.join('\n')).toContain('page source capture failed');
+  });
+
+  it('passed runs carry no page-source evidence', async () => {
+    const result = await runMobileActions(
+      deps(fakeDriver(), { steps: steps([{ action: 'launchApp' }]) }).deps,
+    );
+    expect(result.status).toBe('passed');
+    expect(result.pageSources).toHaveLength(0);
   });
 
   it('captures screenshot-on-failure without replacing the primary failure', async () => {
@@ -380,6 +444,6 @@ describe('mobile action dispatch', () => {
     expect(resultA.status).toBe('passed');
     expect(resultB.status).toBe('failed');
     expect(callsA).toEqual(['tap']);
-    expect(callsB).toEqual(['tap', 'screenshot-capture']);
+    expect(callsB).toEqual(['tap', 'screenshot-capture', 'pagesource-capture']);
   });
 });

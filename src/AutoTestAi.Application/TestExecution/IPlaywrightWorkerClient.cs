@@ -50,6 +50,19 @@ public sealed record WorkerLogDto(long Seq, long TimestampUnixMs, string Level, 
 
 public sealed record WorkerScreenshotDto(int? StepOrder, string FileName, string ContentType, string Base64Content);
 
+/// <summary>
+/// Bounded, redacted page-source snapshot (Slice 3C-4B-3, mobile only).
+/// XmlContent is already secret-masked, heuristically redacted, and
+/// hard-bounded to 1 MB by the worker before it enters the outcome.
+/// </summary>
+public sealed record WorkerPageSourceDto(int? StepOrder, string FileName, string ContentType, string XmlContent);
+
+/// <summary>
+/// Bounded, redacted worker log tail (Slice 3C-4B-3, mobile only).
+/// Most-recent tail only, hard-bounded to 256 KB by the worker.
+/// </summary>
+public sealed record WorkerServerLogDto(string FileName, string ContentType, string TextContent);
+
 /// <summary>Worker-reported healing outcome for one step (Phase 2 Slice 11).</summary>
 public sealed record WorkerHealingAttemptDto(
     int StepOrder,

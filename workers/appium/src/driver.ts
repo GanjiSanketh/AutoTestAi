@@ -61,6 +61,8 @@ export interface IMobileDriver {
   hideKeyboard(sessionId: string): Promise<'closed' | 'absent'>;
   /** Base64 PNG bytes. Never logged. */
   takeScreenshot(sessionId: string): Promise<string>;
+  /** Raw XML page source. Never logged; callers must sanitize before use. */
+  getPageSource(sessionId: string): Promise<string>;
   activateApp(sessionId: string, packageId: string): Promise<void>;
   terminateApp(sessionId: string, packageId: string): Promise<void>;
 }
@@ -372,6 +374,15 @@ export class WebdriverIoDriver implements IMobileDriver {
       return await context.browser.takeScreenshot();
     } catch (error) {
       throw this.interaction('screenshot', error);
+    }
+  }
+
+  async getPageSource(sessionId: string): Promise<string> {
+    const context = this.requireAndroid(sessionId, 'pagesource');
+    try {
+      return await context.browser.getPageSource();
+    } catch (error) {
+      throw this.interaction('pagesource', error);
     }
   }
 
