@@ -26,6 +26,7 @@ public static class DependencyInjection
         services.AddSingleton<IAiProvider, StubAiProvider>();
         services.AddSingleton<IAiProviderResolver, AiProviderResolver>();
         services.AddSingleton<IAiTestGenerationPromptBuilder, AiTestGenerationPromptBuilder>();
+        services.AddSingleton<IAiStoryTestPromptBuilder, AiStoryTestPromptBuilder>();
         services.AddSingleton<IAiFailureAnalysisPromptBuilder, AiFailureAnalysisPromptBuilder>();
         services.AddSingleton<AiGenerationValidator>();
         services.AddSingleton<AiAnalysisValidator>();
@@ -71,6 +72,7 @@ public static class DependencyInjection
         services.AddScoped<ExecutionGrid.IGridLeaseManager, ExecutionGrid.GridLeaseManager>();
         services.AddScoped<ExecutionGrid.IMobileSlotLeaseService, ExecutionGrid.MobileSlotLeaseService>();
         services.AddScoped<IAiTestGenerator, TestGenerationService>();
+        services.AddScoped<IAiStoryTestGenerator, StoryTestGenerationService>();
         services.AddScoped<IAuditService, AuditService>();
         return services;
     }

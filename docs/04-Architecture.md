@@ -836,3 +836,29 @@ responses never carry metadata, IP address, User-Agent, or secrets;
 reads never generate audit events. No migration, no write-path change,
 no retention/purge, no auth-event logging, no cross-project view —
 all explicitly deferred.
+
+## 21. Self-Authoring Tests — Manual Story MVP (Phase 4 Slice 3)
+
+Manual user-story input → AI structured test proposals (max 10) → user
+selection → existing TestCase creation (`sourceType = ai`, v1 `Pending`) →
+existing review/approval → existing execution gate:
+
+```text
+React StoryTestGeneratorPage (testcases.manage UX gate)
+  → POST .../story-test-generation (story-to-tests-v1, sequential ≤10 calls,
+     per-proposal results, nothing persisted)
+  → StoryTestGenerationService (auth, shared 20/min generation budget,
+     story prompt, existing validator/redactor/audit)
+  → IAiProvider abstraction (Ollama/OpenAI adapters unchanged)
+  → user selects proposals → POST .../test-cases (existing path + optional
+     redacted generation provenance) → Pending v1 → Review → Approved → execute
+```
+
+Rules: `test-generation-v1` wording/schema/behavior unchanged (story
+requests delegate to the dedicated `story-to-tests-v1` contract only when
+story context is present); proposals are previews, never persisted by the
+generation endpoint; saved tests are indistinguishable from other
+AI-generated `Pending` tests; human approval remains the sole path to
+`Approved`; no Jira import, no persisted story entity, no story-test
+links, no suite attachment, no autonomous mutation — all deferred.
+No migration, no new dependencies, no new permissions.

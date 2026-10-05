@@ -238,7 +238,13 @@ export function AiTestGeneratorPage() {
         </h1>
         <p className="mt-1 text-sm text-slate-500">
           Generate a complete automated test from structured requirements. Output is
-          AI-generated, stored for human review, and never executed automatically.
+          AI-generated, stored for human review, and never executed automatically.{' '}
+          <Link
+            to={`/projects/${projectId}/test-cases/generate-story`}
+            className="font-medium text-brand-700 hover:text-brand-600"
+          >
+            Or generate proposals from a user story →
+          </Link>
         </p>
       </div>
 

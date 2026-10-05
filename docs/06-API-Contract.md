@@ -328,6 +328,74 @@ endpoints, or prompts. Validation failures → `400`; upstream rate limits →
 (`PROVIDER_NOT_SUPPORTED`). No endpoint executes generated code; failure
 analysis (`AnalyzeFailureAsync`) stays unimplemented until Slice 6.
 
+### 7.1 Story Test Generation (Phase 4 Slice 3, manual-story MVP)
+
+```http
+POST /api/v1/projects/{projectId}/story-test-generation
+```
+
+Example request (manual story input only — no Jira, no story IDs):
+
+```json
+{
+  "storyTitle": "Guest checkout",
+  "storyDescription": "Allow guests to check out without an account.",
+  "acceptanceCriteria": ["Guest can place an order", "Order confirmation is shown"],
+  "targetUrl": "https://example.test/checkout",
+  "framework": "playwright",
+  "platform": "web",
+  "module": "Checkout",
+  "priority": "High",
+  "maxProposals": 2
+}
+```
+
+Example response (proposals are previews — nothing is persisted; `→ 200`):
+
+```json
+{
+  "generationId": "uuid",
+  "promptVersion": "story-to-tests-v1",
+  "proposalCount": 2,
+  "successCount": 2,
+  "failureCount": 0,
+  "proposals": [
+    {
+      "proposalId": "opaque-id",
+      "index": 1,
+      "status": "Succeeded",
+      "title": "Guest checkout happy path",
+      "focusCriterion": "Guest can place an order",
+      "structuredSteps": [{"order": 1, "action": "navigate", "target": "https://example.test/checkout", "value": null}],
+      "sourceCode": "import { test } from '@playwright/test'; …",
+      "assumptions": ["Checkout page exists."],
+      "warnings": [],
+      "provider": "ollama",
+      "promptVersion": "story-to-tests-v1",
+      "provenance": {"source": "story-ai", "promptVersion": "story-to-tests-v1"}
+    }
+  ]
+}
+```
+
+Rules: `testcases.manage` + project membership (admin bypass); anonymous →
+`401`, unauthorized → `403`. `storyTitle` required (≤200);
+`acceptanceCriteria` required, 1–50 entries of ≤2000 chars each;
+`maxProposals` defaults to 10, must be 1–10 (otherwise `400`); other
+bounds mirror generic generation. Generation runs sequential single-test
+calls (at most 10) against the shared per-project 20/minute budget through
+the existing provider abstraction; each call uses the `story-to-tests-v1`
+prompt (generic `test-generation-v1` unchanged) with per-criterion focus
+rotation. Per-proposal results preserve partial success: provider/validation
+failures yield `Failed` proposals with user-safe `errorCode`/`errorMessage`
+(`RATE_LIMITED` stops the fan-out and marks the remainder failed) while
+successful proposals are kept. Failed proposals carry no steps, source, or
+provenance. Saving reuses `POST …/test-cases` with `sourceType = "ai"` plus
+optional redacted generation provenance (`generationProvider/Model/
+LatencyMs/Request`); saved tests start `Pending` (never auto-approved).
+Audit events `story-generation.requested/completed/failed` carry counts and
+versions only — never story text. No migration, no Jira, no story entity.
+
 ## 8. Execution
 
 Implemented in Phase 1 Slice 5. Executions bind exactly one immutable

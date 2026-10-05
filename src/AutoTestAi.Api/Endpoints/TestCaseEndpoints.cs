@@ -14,7 +14,11 @@ public sealed record CreateTestCaseBody(
     string? Status,
     string? SourceType,
     string? SourceCode,
-    JsonElement? StructuredSteps);
+    JsonElement? StructuredSteps,
+    string? GenerationProvider = null,
+    string? GenerationModel = null,
+    long? GenerationLatencyMs = null,
+    JsonElement? GenerationRequest = null);
 
 public sealed record UpdateTestCaseBody(
     string? Title,
@@ -75,7 +79,13 @@ public static class TestCaseEndpoints
                     body?.Status,
                     body?.SourceType,
                     body?.SourceCode,
-                    body?.StructuredSteps), ct);
+                    body?.StructuredSteps,
+                    body?.GenerationProvider,
+                    body?.GenerationModel,
+                    body?.GenerationLatencyMs,
+                    body?.GenerationRequest is { } generationRequest
+                        ? JsonDocument.Parse(generationRequest.GetRawText())
+                        : null), ct);
                 return Results.Created($"/api/v1/test-cases/{created.Id}", created);
             })
             .WithName("CreateTestCase")

@@ -18,11 +18,25 @@ public interface IAiTestGenerationPromptBuilder
 
 public sealed class AiTestGenerationPromptBuilder : IAiTestGenerationPromptBuilder
 {
+    private readonly IAiStoryTestPromptBuilder _storyPrompts;
+
+    /// <summary>
+    /// The story builder is optional so existing constructions keep working;
+    /// DI supplies the singleton. Story requests delegate to the dedicated
+    /// story-to-tests-v1 contract; all other requests use the unchanged v1 path.
+    /// </summary>
+    public AiTestGenerationPromptBuilder(IAiStoryTestPromptBuilder? storyPrompts = null)
+    {
+        _storyPrompts = storyPrompts ?? new AiStoryTestPromptBuilder();
+    }
+
     public string PromptVersion => AiPromptVersions.TestGenerationV1;
 
     public AiPrompt Build(AiGenerationRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (request.Story is not null)
+            return _storyPrompts.Build(request);
 
         const string systemPrompt =
             """

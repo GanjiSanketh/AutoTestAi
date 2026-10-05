@@ -7,6 +7,7 @@ import { RequireAuth } from '../features/auth/RequireAuth';
 import { DashboardPage } from '../features/dashboard/DashboardPage';
 import { TestCaseListPage } from '../features/test-cases/TestCaseListPage';
 import { AiTestGeneratorPage } from '../features/test-cases/AiTestGeneratorPage';
+import { StoryTestGeneratorPage } from '../features/test-cases/StoryTestGeneratorPage';
 import { TestCaseNewPage } from '../features/test-cases/TestCaseNewPage';
 import { TestCaseDetailsPage } from '../features/test-cases/TestCaseDetailsPage';
 import { TestCaseEditPage } from '../features/test-cases/TestCaseEditPage';
@@ -48,6 +49,7 @@ export const router = createBrowserRouter([
           { path: 'test-cases', element: <Navigate to="/projects" replace /> },
           { path: 'projects/:projectId/test-cases', element: <TestCaseListPage /> },
           { path: 'projects/:projectId/test-cases/generate', element: <AiTestGeneratorPage /> },
+          { path: 'projects/:projectId/test-cases/generate-story', element: <StoryTestGeneratorPage /> },
           { path: 'projects/:projectId/test-cases/new', element: <TestCaseNewPage /> },
           { path: 'projects/:projectId/test-cases/:testCaseId', element: <TestCaseDetailsPage /> },
           { path: 'projects/:projectId/test-cases/:testCaseId/edit', element: <TestCaseEditPage /> },

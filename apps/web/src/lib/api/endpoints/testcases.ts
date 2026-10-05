@@ -83,6 +83,10 @@ export interface CreateTestCaseInput {
   sourceType?: string;
   sourceCode?: string;
   structuredSteps?: TestStep[];
+  generationProvider?: string;
+  generationModel?: string;
+  generationLatencyMs?: number;
+  generationRequest?: Record<string, unknown>;
 }
 
 export interface UpdateTestCaseInput {

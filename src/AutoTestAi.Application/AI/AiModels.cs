@@ -19,7 +19,24 @@ public static class AiPromptVersions
     public const string TestGenerationV1 = "test-generation-v1";
     public const string FailureAnalysisV1 = "failure-analysis-v1";
     public const string SelfHealingV1 = "self-healing-v1";
+    /// <summary>Manual user-story to test proposals (Phase 4 Slice 3).
+    /// Dedicated contract; test-generation-v1 is unchanged.</summary>
+    public const string StoryToTestsV1 = "story-to-tests-v1";
 }
+
+/// <summary>
+/// Optional user-story context for test generation (Phase 4 Slice 3).
+/// Null for generic generation — existing constructions are unaffected.
+/// When present, the generation prompt builder renders the story-specific
+/// contract instead of the generic requirements contract.
+/// </summary>
+public sealed record AiStoryContext(
+    string StoryTitle,
+    string? StoryDescription,
+    IReadOnlyList<string> AcceptanceCriteria,
+    int FocusCriterionIndex,
+    string FocusCriterion,
+    IReadOnlyList<int> CoveredCriterionIndexes);
 
 /// <summary>
 /// Provider input for test generation. The server builds this — callers never
@@ -36,7 +53,8 @@ public sealed record AiGenerationRequest(
     IReadOnlyList<string> Requirements,
     string? Module = null,
     string? Priority = null,
-    string? AdditionalContext = null);
+    string? AdditionalContext = null,
+    AiStoryContext? Story = null);
 
 /// <summary>
 /// Legacy step shape kept for backward compatibility with Phase-0 consumers.
