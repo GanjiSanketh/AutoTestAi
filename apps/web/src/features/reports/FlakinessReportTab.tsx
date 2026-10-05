@@ -15,7 +15,7 @@ import {
 import type { DateRange } from '../../lib/api/endpoints/dashboard';
 
 const PAGE_SIZE = 25;
-const SORTS = ['flakinessRate', 'testKey', 'title', 'executions', 'lastRun'] as const;
+const SORTS = ['flakinessRate', 'riskScore', 'testKey', 'title', 'executions', 'lastRun'] as const;
 
 function formatRate(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
@@ -26,6 +26,19 @@ function formatTime(iso: string | null | undefined): string {
   if (!iso) return '—';
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+}
+
+function riskTone(band: string | null | undefined): 'success' | 'danger' | 'warning' | 'neutral' {
+  switch ((band ?? '').toLowerCase()) {
+    case 'high':
+      return 'danger';
+    case 'medium':
+      return 'warning';
+    case 'low':
+      return 'success';
+    default:
+      return 'neutral';
+  }
 }
 
 /**
@@ -112,6 +125,7 @@ export function FlakinessReportTab({
         <CardDescription>
           Tests with mixed pass/fail outcomes are flaky; consistently failing tests are
           failure-prone, not flaky. Healing activity alongside flakiness is correlation, not causation.
+          Flakiness risk is an advisory-only deterministic forecast — never a release gate.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -284,6 +298,7 @@ export function FlakinessReportTab({
                     <th scope="col" className="py-2 pr-3 font-medium">Pass/Fail</th>
                     <th scope="col" className="py-2 pr-3 font-medium">State</th>
                     <th scope="col" className="py-2 pr-3 font-medium">Flakiness</th>
+                    <th scope="col" className="py-2 pr-3 font-medium">Risk</th>
                     <th scope="col" className="py-2 pr-3 font-medium">Last outcome</th>
                     <th scope="col" className="py-2 font-medium">Healing</th>
                   </tr>
@@ -305,6 +320,22 @@ export function FlakinessReportTab({
                         </Badge>
                       </td>
                       <td className="py-2 pr-3 font-mono">{formatRate(row.flakinessRate)}</td>
+                      <td className="py-2 pr-3">
+                        {row.riskScore === null || row.riskScore === undefined ? (
+                          <span className="text-xs text-slate-400">Insufficient history</span>
+                        ) : (
+                          <>
+                            <Badge tone={riskTone(row.riskBand)}>
+                              {row.riskScore} · {row.riskBand}
+                            </Badge>
+                            {row.riskFactors.length > 0 && (
+                              <span className="block text-xs text-slate-500">
+                                {row.riskFactors.join('; ')}
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </td>
                       <td className="py-2 pr-3 text-xs text-slate-600">
                         {row.lastOutcome ?? '—'}
                         <span className="block font-mono text-slate-400">{formatTime(row.lastRunAt)}</span>

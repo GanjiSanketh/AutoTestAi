@@ -181,6 +181,10 @@ export interface ExecutiveOverview {
   healingApplied: number;
   unstableExecutions: number;
   cancelledExecutions: number;
+  highRiskTests: number;
+  mediumRiskTests: number;
+  lowRiskTests: number;
+  insufficientHistoryTests: number;
 }
 
 export interface FlakinessTrendPoint {

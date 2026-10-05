@@ -768,3 +768,45 @@ assignments, and honors cancellation. Metrics flow through the error
 message and `visual.compared` audit (identifier-only); no migration.
 - No AI triage, no masked regions, no auto-refresh/replacement, no
 Playwright/iOS/video comparison.
+
+## 19. Deterministic Flakiness Risk Forecasting (Phase 4 Slice 1)
+
+Advisory-only, deterministic forecast of which tests show deteriorating
+reliability, built on the Slice 12 analytics stack. No ML/LLM, no
+persistence, no execution gating, no autonomous action.
+
+Formula (`FlakinessForecast`, pure functions, independently reproducible):
+
+```text
+Inputs: pass/fail verdicts newest-first + window totals (passed, failed).
+Other statuses are excluded upstream, exactly like the flakiness aggregates.
+
+Minimum history: passed + failed < MinVerdictsForFlakiness (2)
+  → null score/band, empty factors (never a fake low-risk claim).
+
+Signals (each 0–100):
+  recent   = 100 * fails in newest min(5, N) / min(5, N)
+  trend    = max(0, failShare(newest ceil(N/2)) - failShare(older remainder))
+  streak   = trailing newest-first consecutive failures: 0→0, 1→25, 2→50, 3→75, ≥4→100
+
+score = round_half_away(0.50 * recent + 0.30 * trend + 0.20 * streak),
+  clamped to 0–100. Bands: 0–39 Low, 40–69 Medium, 70–100 High.
+
+Factors (fixed order): recent >= 50 → "Recent failure rate is elevated";
+trend > 0 → "Failure trend is deteriorating"; streak >= 2 →
+"Consecutive failures detected"; none fired but score > 0 →
+"Intermittent failures in history".
+
+Worked example (newest-first [Fail, Fail, Pass, Fail, Pass]):
+recent = 60, trend = 66.67 − 50 = 16.67, streak = 50 →
+score = round(30 + 5.0 + 10) = 45 (Medium), all three factors fire.
+```
+
+Plumbing: `GetTestRecentVerdictsAsync` (one bounded newest-first read,
+~20k rows project-wide, 30 per test) feeds the pure forecast per
+candidate; results ride the flakiness report DTO/CSV (`riskScore`,
+`riskBand`, `riskFactors`) with a `riskScore` sort key (nulls last) and a
+dashboard band-count summary on the existing flakiness card. Reads require
+`reports.read`/`dashboard.read` with existing project isolation; no audit
+writes (read-only); no wall-clock dependence (window + CreatedAt/Id
+ordering only); repeated reads over immutable history are identical.

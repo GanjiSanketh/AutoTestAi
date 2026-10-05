@@ -524,6 +524,35 @@ public sealed class EfReportQueryStore : IReportQueryStore
         return items;
     }
 
+    public async Task<IReadOnlyList<TestVerdictRow>> GetTestRecentVerdictsAsync(
+        Guid projectId, ReportDateRange range, IReadOnlyList<Guid> testCaseIds,
+        int perTestTake, CancellationToken ct)
+    {
+        // Single newest-first pass over the window (Slice 12 verdict
+        // analysis): pass/fail execution statuses only, matching the
+        // flakiness aggregates. Bounded server-side; the caller groups per
+        // test and applies perTestTake. Same-millisecond ties break by
+        // execution id for determinism.
+        var take = Math.Clamp(perTestTake, 1, 100);
+        var ids = testCaseIds.Distinct().Take(5000).ToList();
+        var rows = await WindowExecutions(projectId, range)
+            .Where(e => (e.Status == ExecutionStatus.Passed || e.Status == ExecutionStatus.Failed)
+                && _db.ExecutionTests.Any(t =>
+                    t.ExecutionId == e.Id && ids.Contains(t.TestCaseId)))
+            .OrderByDescending(e => e.CreatedAt).ThenBy(e => e.Id)
+            .Join(_db.ExecutionTests,
+                e => e.Id, t => t.ExecutionId,
+                (e, t) => new { t.TestCaseId, Passed = e.Status == ExecutionStatus.Passed, e.CreatedAt })
+            .Where(x => ids.Contains(x.TestCaseId))
+            .Take(20000)
+            .ToListAsync(ct);
+        return rows
+            .GroupBy(x => x.TestCaseId)
+            .SelectMany(g => g.Take(take).Select(x =>
+                new TestVerdictRow(g.Key, x.Passed, x.CreatedAt)))
+            .ToList();
+    }
+
     public async Task<IReadOnlyList<TestHealingRow>> GetTestHealingRowsAsync(
         Guid projectId, ReportDateRange range, CancellationToken ct)
     {
@@ -725,6 +754,7 @@ public sealed class UnavailableReportQueryStore : IReportQueryStore
     public Task<IReadOnlyList<TestOutcomeRow>> GetTestOutcomeRowsAsync(Guid p, ReportDateRange r, CancellationToken ct) => Fail<IReadOnlyList<TestOutcomeRow>>();
     public Task<IReadOnlyList<TestDayOutcomeRow>> GetTestDayOutcomeRowsAsync(Guid p, ReportDateRange r, CancellationToken ct) => Fail<IReadOnlyList<TestDayOutcomeRow>>();
     public Task<IReadOnlyList<TestLastRunRow>> GetTestLastRunsAsync(Guid p, ReportDateRange r, IReadOnlyList<Guid> ids, CancellationToken ct) => Fail<IReadOnlyList<TestLastRunRow>>();
+    public Task<IReadOnlyList<TestVerdictRow>> GetTestRecentVerdictsAsync(Guid p, ReportDateRange r, IReadOnlyList<Guid> ids, int perTestTake, CancellationToken ct) => Fail<IReadOnlyList<TestVerdictRow>>();
     public Task<IReadOnlyList<TestHealingRow>> GetTestHealingRowsAsync(Guid p, ReportDateRange r, CancellationToken ct) => Fail<IReadOnlyList<TestHealingRow>>();
     public Task<CoverageCounts> GetCoverageCountsAsync(Guid p, CancellationToken ct) => Fail<CoverageCounts>();
     public Task<int> GetOpenCriticalHighDefectCountAsync(Guid p, CancellationToken ct) => Fail<int>();

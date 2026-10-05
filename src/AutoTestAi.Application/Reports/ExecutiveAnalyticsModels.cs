@@ -40,7 +40,11 @@ public sealed record ExecutiveAnalyticsDto(
     int HealingAttempts,
     int HealingApplied,
     int UnstableExecutions,
-    int CancelledExecutions);
+    int CancelledExecutions,
+    int HighRiskTests = 0,
+    int MediumRiskTests = 0,
+    int LowRiskTests = 0,
+    int InsufficientHistoryTests = 0);
 
 public sealed record FlakinessTrendPointDto(
     string Date,
@@ -72,7 +76,10 @@ public sealed record FlakyTestDto(
     string? LastOutcome,
     DateTimeOffset? LastRunAt,
     int HealingAttempts,
-    int HealedRuns);
+    int HealedRuns,
+    int? RiskScore = null,
+    string? RiskBand = null,
+    IReadOnlyList<string>? RiskFactors = null);
 
 public sealed record FlakyTestsFilters(
     string? Search,
@@ -158,6 +165,14 @@ public sealed record TestLastRunRow(
     Guid TestCaseId,
     Guid ExecutionId,
     string Status,
+    DateTimeOffset CreatedAt);
+
+/// <summary>One terminal pass/fail verdict for forecast sequencing
+/// (Phase 4 Slice 1). Newest-first per test, server-side capped; Other
+/// statuses are excluded upstream exactly like the flakiness aggregates.</summary>
+public sealed record TestVerdictRow(
+    Guid TestCaseId,
+    bool Passed,
     DateTimeOffset CreatedAt);
 
 /// <summary>Healing activity per test case within a window.</summary>

@@ -147,6 +147,10 @@ public sealed class DashboardService : IDashboardService
         var eligible = outcomes.Count(o => o.Passed + o.Failed >= AnalyticsCalculations.MinVerdictsForFlakiness);
         var index = AnalyticsCalculations.FlakinessIndex(flaky, eligible);
 
+        // Phase 4 Slice 1: advisory risk-band summary over the same
+        // verdict history. One bounded read; pure per-test computation.
+        var riskBands = await LoadRiskBandsAsync(projectId, range, ct);
+
         var coverageValue = AnalyticsCalculations.AutomationCoverage(coverage.AutomatedCases, coverage.EligibleCases);
         var (score, status, components, _) = LoadReadiness(
             kpis, outcomes, coverage, openCritHigh);
@@ -167,7 +171,34 @@ public sealed class DashboardService : IDashboardService
             durations.AverageMs, durations.TotalMs, durations.Count,
             AnalyticsCalculations.HealingSuccessRate(healing.Applied, healing.Attempts),
             healing.Attempts, healing.Applied,
-            kpis.TimedOut + kpis.Error, kpis.Cancelled);
+            kpis.TimedOut + kpis.Error, kpis.Cancelled,
+            riskBands.High, riskBands.Medium, riskBands.Low, riskBands.Insufficient);
+    }
+
+    private async Task<(int High, int Medium, int Low, int Insufficient)> LoadRiskBandsAsync(
+        Guid projectId, ReportDateRange range, CancellationToken ct)
+    {
+        var outcomes = await _store.GetTestOutcomeRowsAsync(projectId, range, ct);
+        if (outcomes.Count == 0) return (0, 0, 0, 0);
+        var ids = outcomes.Select(o => o.TestCaseId).ToList();
+        var verdicts = (await _store.GetTestRecentVerdictsAsync(
+                projectId, range, ids, FlakinessForecast.MaxVerdictsPerTest, ct))
+            .GroupBy(r => r.TestCaseId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(r => r.CreatedAt).Select(r => r.Passed).ToList());
+        var high = 0; var medium = 0; var low = 0; var insufficient = 0;
+        foreach (var outcome in outcomes)
+        {
+            if (!verdicts.TryGetValue(outcome.TestCaseId, out var sequence))
+                sequence = new List<bool>();
+            var forecast = FlakinessForecast.Forecast(sequence, outcome.Passed, outcome.Failed);
+            if (forecast.RiskBand is null) insufficient++;
+            else if (forecast.RiskBand == FlakinessForecast.BandHigh) high++;
+            else if (forecast.RiskBand == FlakinessForecast.BandMedium) medium++;
+            else low++;
+        }
+        return (high, medium, low, insufficient);
     }
 
     public async Task<FlakinessTrendDto> GetFlakinessTrendAsync(

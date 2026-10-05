@@ -224,7 +224,43 @@ public sealed class ExecutiveAnalyticsTests
         Assert.Null(dto.ReleaseReadiness);
         Assert.Null(dto.HealingSuccessRate);
         Assert.Null(dto.AverageDurationMs);
+        Assert.Equal(0, dto.HighRiskTests);
+        Assert.Equal(0, dto.InsufficientHistoryTests);
     }
+
+    [Fact]
+    public async Task Overview_CountsRiskBands_FromVerdictHistory()
+    {
+        var (service, store) = Dashboards(Member());
+        var high = Guid.NewGuid();
+        var low = Guid.NewGuid();
+        var thin = Guid.NewGuid();
+        store.OutcomeRows.Add(new TestOutcomeRow(high, 0, 4, 0, Day(28)));
+        store.OutcomeRows.Add(new TestOutcomeRow(low, 4, 0, 0, Day(28)));
+        store.OutcomeRows.Add(new TestOutcomeRow(thin, 0, 1, 0, Day(28)));
+        var at = Day(28);
+        foreach (var pass in new[] { false, false, false, false })
+        {
+            store.VerdictRows.Add(new TestVerdictRow(high, pass, at));
+            at = at.AddDays(-1);
+        }
+        at = Day(28);
+        foreach (var pass in new[] { true, true, true, true })
+        {
+            store.VerdictRows.Add(new TestVerdictRow(low, pass, at));
+            at = at.AddDays(-1);
+        }
+        store.VerdictRows.Add(new TestVerdictRow(thin, false, Day(28)));
+
+        var dto = await service.GetExecutiveOverviewAsync(ProjectA, Range(), CancellationToken.None);
+        Assert.Equal(1, dto.HighRiskTests);
+        Assert.Equal(0, dto.MediumRiskTests);
+        Assert.Equal(1, dto.LowRiskTests);
+        Assert.Equal(1, dto.InsufficientHistoryTests);
+    }
+
+    private static DateTimeOffset Day(int day)
+        => new(2026, 9, day, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
     public async Task Overview_Composes_RealAggregates()

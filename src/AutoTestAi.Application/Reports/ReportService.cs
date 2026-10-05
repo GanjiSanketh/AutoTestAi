@@ -109,6 +109,7 @@ public sealed class ReportService : IReportService
         var (skip, take, pageNumber, size) = Paginate(page, pageSize);
         var candidates = await LoadCandidatesAsync(projectId, range, ct);
         var filtered = FlakyReportShaper.ApplyFilters(candidates, normalized);
+        filtered = await AttachForecastsAsync(projectId, range, filtered, ct);
         var sorted = FlakyReportShaper.ApplySort(filtered, sortKey, descending);
         var pageIds = sorted.Skip(skip).Take(take).Select(c => c.TestCaseId).ToList();
         var lastRuns = (await _store.GetTestLastRunsAsync(projectId, range, pageIds, ct))
@@ -130,6 +131,7 @@ public sealed class ReportService : IReportService
         var candidates = await LoadCandidatesAsync(projectId, range, ct);
         // Bounded deterministic export: same filters, TestKey order, hard cap.
         var filtered = FlakyReportShaper.ApplyFilters(candidates, normalized);
+        filtered = await AttachForecastsAsync(projectId, range, filtered, ct);
         var sorted = FlakyReportShaper.ApplySort(filtered, "testKey", descending: false);
         var capped = sorted.Take(5000).ToList();
         var pageIds = capped.Select(c => c.TestCaseId).ToList();
@@ -174,7 +176,33 @@ public sealed class ReportService : IReportService
             candidate.TotalExecutions, candidate.Passed, candidate.Failed, candidate.Other,
             candidate.IsFlaky, candidate.FlakinessRate,
             last?.Status, candidate.LastRunAt,
-            candidate.HealingAttempts, candidate.HealedRuns);
+            candidate.HealingAttempts, candidate.HealedRuns,
+            candidate.Forecast?.RiskScore, candidate.Forecast?.RiskBand,
+            candidate.Forecast?.RiskFactors ?? Array.Empty<string>());
+
+    /// <summary>
+    /// Phase 4 Slice 1: advisory risk forecasts over the existing verdict
+    /// history. One bounded read; pure per-test computation; read-only.
+    /// </summary>
+    private async Task<IReadOnlyList<FlakyCandidate>> AttachForecastsAsync(
+        Guid projectId, ReportDateRange range, IReadOnlyList<FlakyCandidate> candidates, CancellationToken ct)
+    {
+        if (candidates.Count == 0) return candidates;
+        var ids = candidates.Select(c => c.TestCaseId).ToList();
+        var rows = await _store.GetTestRecentVerdictsAsync(projectId, range, ids, FlakinessForecast.MaxVerdictsPerTest, ct);
+        var byTest = rows
+            .GroupBy(r => r.TestCaseId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(r => r.CreatedAt).Select(r => r.Passed).ToList());
+        return candidates.Select(c =>
+        {
+            if (!byTest.TryGetValue(c.TestCaseId, out var verdicts))
+                verdicts = new List<bool>();
+            var forecast = FlakinessForecast.Forecast(verdicts, c.Passed, c.Failed);
+            return c with { Forecast = forecast };
+        }).ToList();
+    }
 
     private static FlakyTestsFilters NormalizeFilters(FlakyTestsFilters filters)
     {
@@ -194,8 +222,8 @@ public sealed class ReportService : IReportService
     {
         var key = string.IsNullOrWhiteSpace(sort) ? FlakyReportShaper.DefaultSort : sort.Trim();
         if (!FlakyReportShaper.SortKeys.Contains(key))
-            throw new ValidationException("Sort must be one of 'testKey', 'title', 'executions', 'flakinessRate', 'lastRun'.",
-                new[] { new FieldError("sort", "Sort must be one of 'testKey', 'title', 'executions', 'flakinessRate', 'lastRun'.") });
+            throw new ValidationException("Sort must be one of 'testKey', 'title', 'executions', 'flakinessRate', 'lastRun', 'riskScore'.",
+                new[] { new FieldError("sort", "Sort must be one of 'testKey', 'title', 'executions', 'flakinessRate', 'lastRun', 'riskScore'.") });
         return key;
     }
 

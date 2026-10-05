@@ -63,6 +63,10 @@ const overview = (overrides = {}) => ({
   healingApplied: 2,
   unstableExecutions: 1,
   cancelledExecutions: 0,
+  highRiskTests: 1,
+  mediumRiskTests: 0,
+  lowRiskTests: 2,
+  insufficientHistoryTests: 1,
   ...overrides,
 });
 
@@ -100,6 +104,13 @@ describe('ExecutiveSection (Slice 12)', () => {
     expect(screen.getByText(/never an AI release decision/i)).toBeTruthy();
     // Chart fallback text stays in the accessibility tree.
     expect(await screen.findByText(/2026-09-28: 50.0%/)).toBeTruthy();
+  });
+
+  it('summarizes advisory risk bands without implying a gate', async () => {
+    mockedExecutive.mockResolvedValue(overview());
+    renderSection();
+    expect(await screen.findByText(/Advisory risk:/)).toBeTruthy();
+    expect(screen.getByText(/1 high · 0 medium · 2 low · 1 insufficient history/)).toBeTruthy();
   });
 
   it('shows insufficient-data states instead of fake zeroes', async () => {

@@ -63,6 +63,13 @@ internal sealed class FakeReportQueryStore : IReportQueryStore
         => Task.FromResult<IReadOnlyList<TestDayOutcomeRow>>(DayOutcomeRows);
     public Task<IReadOnlyList<TestLastRunRow>> GetTestLastRunsAsync(Guid p, ReportDateRange r, IReadOnlyList<Guid> ids, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<TestLastRunRow>>(LastRuns.Where(x => ids.Contains(x.TestCaseId)).ToList());
+    public List<TestVerdictRow> VerdictRows = new();
+    public Task<IReadOnlyList<TestVerdictRow>> GetTestRecentVerdictsAsync(Guid p, ReportDateRange r, IReadOnlyList<Guid> ids, int perTestTake, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<TestVerdictRow>>(VerdictRows
+            .Where(x => ids.Contains(x.TestCaseId))
+            .GroupBy(x => x.TestCaseId)
+            .SelectMany(g => g.OrderByDescending(x => x.CreatedAt).Take(Math.Max(1, perTestTake)))
+            .ToList());
     public Task<IReadOnlyList<TestHealingRow>> GetTestHealingRowsAsync(Guid p, ReportDateRange r, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<TestHealingRow>>(HealingRows);
     public Task<CoverageCounts> GetCoverageCountsAsync(Guid p, CancellationToken ct)

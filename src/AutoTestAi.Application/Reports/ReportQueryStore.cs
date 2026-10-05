@@ -75,6 +75,17 @@ public interface IReportQueryStore
         Guid projectId, ReportDateRange range, IReadOnlyList<Guid> testCaseIds,
         CancellationToken ct);
 
+    /// <summary>
+    /// Recent terminal pass/fail verdicts (Phase 4 Slice 1 forecasting
+    /// input). Flat newest-first rows (CreatedAt desc, id tiebreak,
+    /// mirroring GetTestLastRunsAsync) with a server-side total cap; the
+    /// caller groups per test and applies perTestTake. Other statuses are
+    /// excluded upstream, exactly like the flakiness aggregates.
+    /// </summary>
+    Task<IReadOnlyList<TestVerdictRow>> GetTestRecentVerdictsAsync(
+        Guid projectId, ReportDateRange range, IReadOnlyList<Guid> testCaseIds,
+        int perTestTake, CancellationToken ct);
+
     /// <summary>Healing activity per test case in the window.</summary>
     Task<IReadOnlyList<TestHealingRow>> GetTestHealingRowsAsync(
         Guid projectId, ReportDateRange range, CancellationToken ct);

@@ -80,6 +80,10 @@ export interface FlakyTest {
   lastRunAt: string | null;
   healingAttempts: number;
   healedRuns: number;
+  /** Advisory-only deterministic forecast (null = insufficient history). */
+  riskScore: number | null;
+  riskBand: string | null;
+  riskFactors: string[];
 }
 
 export interface FlakinessReportFilters extends DateRange {

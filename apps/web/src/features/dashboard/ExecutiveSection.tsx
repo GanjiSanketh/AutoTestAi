@@ -172,6 +172,10 @@ export function ExecutiveSection({
                 ? 'Not enough repeated executions yet (needs 2+ verdicts per test)'
                 : `${overview.flakyTests} flaky of ${overview.eligibleTests} eligible tests`}
             </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Advisory risk: {overview.highRiskTests} high · {overview.mediumRiskTests} medium ·{' '}
+              {overview.lowRiskTests} low · {overview.insufficientHistoryTests} insufficient history
+            </p>
           </CardContent>
         </Card>
         <Card>

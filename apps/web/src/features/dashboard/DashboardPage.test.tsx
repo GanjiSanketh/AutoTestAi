@@ -95,6 +95,10 @@ const executivePayload = () => ({
   healingApplied: 2,
   unstableExecutions: 1,
   cancelledExecutions: 0,
+  highRiskTests: 0,
+  mediumRiskTests: 0,
+  lowRiskTests: 0,
+  insufficientHistoryTests: 0,
 });
 
 const summaryPayload = (overrides = {}) => ({

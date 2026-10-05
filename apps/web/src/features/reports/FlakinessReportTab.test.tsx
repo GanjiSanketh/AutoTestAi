@@ -45,6 +45,9 @@ const row = (overrides = {}) => ({
   lastRunAt: '2026-09-28T12:00:00Z',
   healingAttempts: 1,
   healedRuns: 1,
+  riskScore: 45,
+  riskBand: 'Medium',
+  riskFactors: ['Recent failure rate is elevated'],
   ...overrides,
 });
 
@@ -70,6 +73,25 @@ describe('FlakinessReportTab (Slice 12)', () => {
     expect(screen.getByText('Flaky')).toBeTruthy();
     expect(screen.getByText('25.0%')).toBeTruthy();
     expect(screen.getByText('1/1 recovered')).toBeTruthy();
+  });
+
+  it('renders advisory risk score, band, and factors', async () => {
+    mockedReport.mockResolvedValue({ items: [row()], totalCount: 1, page: 1, pageSize: 25 });
+    renderTab();
+    expect(await screen.findByText(/45 · Medium/)).toBeTruthy();
+    expect(screen.getByText('Recent failure rate is elevated')).toBeTruthy();
+    expect(screen.getByText(/advisory-only deterministic forecast/)).toBeTruthy();
+  });
+
+  it('renders a neutral state for insufficient history', async () => {
+    mockedReport.mockResolvedValue({
+      items: [row({ riskScore: null, riskBand: null, riskFactors: [] })],
+      totalCount: 1,
+      page: 1,
+      pageSize: 25,
+    });
+    renderTab();
+    expect(await screen.findByText('Insufficient history')).toBeTruthy();
   });
 
   it('shows an empty state when nothing matches', async () => {

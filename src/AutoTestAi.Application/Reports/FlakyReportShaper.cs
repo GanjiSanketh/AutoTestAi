@@ -19,7 +19,8 @@ public sealed record FlakyCandidate(
     int Other,
     DateTimeOffset? LastRunAt,
     int HealingAttempts,
-    int HealedRuns)
+    int HealedRuns,
+    FlakinessRiskForecast? Forecast = null)
 {
     public int TotalExecutions => Passed + Failed + Other;
     public bool IsFlaky => AnalyticsCalculations.IsFlaky(Passed, Failed);
@@ -30,7 +31,7 @@ public static class FlakyReportShaper
 {
     public static readonly IReadOnlySet<string> SortKeys =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        { "testKey", "title", "executions", "flakinessRate", "lastRun" };
+        { "testKey", "title", "executions", "flakinessRate", "lastRun", "riskScore" };
 
     public const string DefaultSort = "flakinessRate";
 
@@ -79,6 +80,10 @@ public static class FlakyReportShaper
                 .OrderBy(c => c.FlakinessRate is null).ThenBy(c => c.FlakinessRate),
             ("flakinessrate", true) => candidates
                 .OrderBy(c => c.FlakinessRate is null).ThenByDescending(c => c.FlakinessRate),
+            ("riskscore", false) => candidates
+                .OrderBy(c => c.Forecast?.RiskScore is null).ThenBy(c => c.Forecast?.RiskScore),
+            ("riskscore", true) => candidates
+                .OrderBy(c => c.Forecast?.RiskScore is null).ThenByDescending(c => c.Forecast?.RiskScore),
             ("lastrun", false) => candidates
                 .OrderBy(c => c.LastRunAt is null).ThenBy(c => c.LastRunAt),
             ("lastrun", true) => candidates
@@ -153,7 +158,7 @@ public static class CsvExporter
     {
         var lines = new List<string>(rows.Count + 1)
         {
-            "testKey,title,module,priority,framework,platform,executions,passed,failed,other,isFlaky,flakinessRate,lastOutcome,lastRunAt,healingAttempts,healedRuns",
+            "testKey,title,module,priority,framework,platform,executions,passed,failed,other,isFlaky,flakinessRate,lastOutcome,lastRunAt,healingAttempts,healedRuns,riskScore,riskBand,riskFactors",
         };
         foreach (var r in rows)
         {
@@ -167,6 +172,10 @@ public static class CsvExporter
                 Cell(r.LastOutcome),
                 r.LastRunAt.HasValue ? r.LastRunAt.Value.UtcDateTime.ToString("o") : string.Empty,
                 r.HealingAttempts.ToString(), r.HealedRuns.ToString(),
+                r.RiskScore.HasValue ? r.RiskScore.Value.ToString() : string.Empty,
+                Cell(r.RiskBand),
+                Cell(r.RiskFactors is null || r.RiskFactors.Count == 0
+                    ? null : string.Join("; ", r.RiskFactors)),
             }));
         }
         return System.Text.Encoding.UTF8.GetBytes(string.Join("\r\n", lines) + "\r\n");
