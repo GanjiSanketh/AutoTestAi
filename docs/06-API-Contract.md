@@ -151,6 +151,33 @@ Semantics:
 - CSV export (`text/csv`, attachment): same filters, TestKey order, max 5000
   rows, RFC-4180 quoting, safe columns only (no secrets, logs, or evidence).
 
+### 4.2 Audit Explorer (Phase 4 Slice 2)
+
+Project-scoped read-only audit exploration over the existing `audit_events`
+table (Audit Explorer foundation — not full enterprise compliance).
+Same project scoping, UTC date-range rules, and permission model as above:
+both routes require `reports.read`. Reads never generate audit events.
+
+```http
+GET /api/v1/projects/{projectId}/audit/events?from=&to=&action=&actor=&entityType=&page=&pageSize=
+GET /api/v1/projects/{projectId}/audit/export?from=&to=&action=&actor=&entityType=
+```
+
+Semantics:
+
+- Filters: `action` (exact backend action string), `actor` (user ID),
+  `entityType` (exact entity type). No metadata search, no full-text search.
+- Pagination follows the report convention (default page size 25, max 100;
+  oversized values normalize). Ordering is deterministic: `CreatedAt`
+  descending, then `Id` descending.
+- List items expose safe fields only (`id`, `timestamp`, `action`,
+  `entityType`, `entityId`, `actorUserId` — null preserved for
+  system-originated rows). Metadata, IP address, and User-Agent never
+  leave the server.
+- CSV export (`text/csv`, attachment): same filters, CreatedAt/Id order,
+  max 5000 rows, RFC-4180 quoting, columns
+  `timestamp,action,entityType,entityId,actorUserId` only.
+
 ## 5. Projects
 
 Implemented in Phase 1 Slice 2. List returns only accessible projects

@@ -188,4 +188,29 @@ public static class CsvExporter
             ? $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\""
             : value;
     }
+
+    /// <summary>
+    /// Phase 4 Slice 2: bounded audit-explorer export. Approved safe columns
+    /// only (timestamp,action,entityType,entityId,actorUserId) — metadata,
+    /// IP address, and User-Agent are never exported.
+    /// </summary>
+    public static byte[] ExportAuditEvents(IReadOnlyList<AuditEventItem> rows)
+    {
+        var lines = new List<string>(rows.Count + 1)
+        {
+            "timestamp,action,entityType,entityId,actorUserId",
+        };
+        foreach (var r in rows)
+        {
+            lines.Add(string.Join(",", new[]
+            {
+                r.Timestamp.UtcDateTime.ToString("o"),
+                Cell(r.Action),
+                Cell(r.EntityType),
+                Cell(r.EntityId),
+                r.ActorUserId.HasValue ? r.ActorUserId.Value.ToString() : string.Empty,
+            }));
+        }
+        return System.Text.Encoding.UTF8.GetBytes(string.Join("\r\n", lines) + "\r\n");
+    }
 }

@@ -241,6 +241,14 @@ export function ReportsPage() {
               </option>
             ))}
           </select>
+          {projectId && (
+            <Link
+              to={`/projects/${projectId}/audit`}
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:text-slate-900"
+            >
+              Audit Explorer
+            </Link>
+          )}
         </div>
       </div>
 

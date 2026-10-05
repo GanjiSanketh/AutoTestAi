@@ -37,6 +37,7 @@ internal sealed class FakeReportQueryStore : IReportQueryStore
     public Func<Guid, ReportDateRange, ExecutionReportFilters, int, int, CancellationToken, Task<PagedResult<ExecutionReportItem>>>? ExecQuery;
     public Func<Guid, ReportDateRange, DefectReportFilters, int, int, CancellationToken, Task<PagedResult<DefectReportItem>>>? DefectQuery;
     public Func<Guid, ReportDateRange, TicketReportFilters, int, int, CancellationToken, Task<PagedResult<TicketReportItem>>>? TicketQuery;
+    public Func<Guid, ReportDateRange, AuditEventFilters, int, int, CancellationToken, Task<PagedResult<AuditEventItem>>>? AuditQuery;
 
     public Task<TestCaseKpis> GetTestCaseKpisAsync(Guid p, CancellationToken ct) => Task.FromResult(TestCasesValue);
     public Task<ExecutionKpis> GetExecutionKpisAsync(Guid p, ReportDateRange r, CancellationToken ct) => Task.FromResult(ExecutionsValue);
@@ -57,6 +58,8 @@ internal sealed class FakeReportQueryStore : IReportQueryStore
         => DefectQuery is null ? Task.FromResult(new PagedResult<DefectReportItem>(Array.Empty<DefectReportItem>(), 0, 0, 0)) : DefectQuery(p, r, f, s, t, ct);
     public Task<PagedResult<TicketReportItem>> QueryTicketsAsync(Guid p, ReportDateRange r, TicketReportFilters f, int s, int t, CancellationToken ct)
         => TicketQuery is null ? Task.FromResult(new PagedResult<TicketReportItem>(Array.Empty<TicketReportItem>(), 0, 0, 0)) : TicketQuery(p, r, f, s, t, ct);
+    public Task<PagedResult<AuditEventItem>> QueryAuditEventsAsync(Guid p, ReportDateRange r, AuditEventFilters f, int s, int t, CancellationToken ct)
+        => AuditQuery is null ? Task.FromResult(new PagedResult<AuditEventItem>(Array.Empty<AuditEventItem>(), 0, 0, 0)) : AuditQuery(p, r, f, s, t, ct);
     public Task<IReadOnlyList<TestOutcomeRow>> GetTestOutcomeRowsAsync(Guid p, ReportDateRange r, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<TestOutcomeRow>>(OutcomeRows);
     public Task<IReadOnlyList<TestDayOutcomeRow>> GetTestDayOutcomeRowsAsync(Guid p, ReportDateRange r, CancellationToken ct)

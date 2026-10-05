@@ -434,6 +434,37 @@ public sealed class EfReportQueryStore : IReportQueryStore
         return new PagedResult<TicketReportItem>(items, total, 0, 0);
     }
 
+    /// <summary>
+    /// Audit Explorer (Phase 4 Slice 2). Project predicate is always applied
+    /// server-side. Only safe columns are projected — MetadataJson,
+    /// IpAddress, and UserAgent never leave the database.
+    /// </summary>
+    public async Task<PagedResult<AuditEventItem>> QueryAuditEventsAsync(
+        Guid projectId, ReportDateRange range, AuditEventFilters filters,
+        int skip, int take, CancellationToken ct)
+    {
+        var query = _db.AuditEvents
+            .Where(a => a.ProjectId == projectId && a.CreatedAt >= range.From && a.CreatedAt <= range.To);
+        if (!string.IsNullOrWhiteSpace(filters.Action))
+            query = query.Where(a => a.Action == filters.Action);
+        if (filters.ActorUserId is not null)
+        {
+            var actor = filters.ActorUserId.Value;
+            query = query.Where(a => a.ActorUserId == actor);
+        }
+        if (!string.IsNullOrWhiteSpace(filters.EntityType))
+            query = query.Where(a => a.EntityType == filters.EntityType);
+        var total = await query.CountAsync(ct);
+        var items = await query
+            .OrderByDescending(a => a.CreatedAt)
+            .ThenByDescending(a => a.Id)
+            .Skip(skip).Take(take)
+            .Select(a => new AuditEventItem(
+                a.Id, a.CreatedAt, a.Action, a.EntityType, a.EntityId, a.ActorUserId))
+            .ToListAsync(ct);
+        return new PagedResult<AuditEventItem>(items, total, 0, 0);
+    }
+
     // ---------- executive analytics primitives (Slice 12) ----------
 
     /// <summary>
@@ -751,6 +782,7 @@ public sealed class UnavailableReportQueryStore : IReportQueryStore
     public Task<PagedResult<ExecutionReportItem>> QueryExecutionsAsync(Guid p, ReportDateRange r, ExecutionReportFilters f, int s, int t, CancellationToken ct) => Fail<PagedResult<ExecutionReportItem>>();
     public Task<PagedResult<DefectReportItem>> QueryDefectsAsync(Guid p, ReportDateRange r, DefectReportFilters f, int s, int t, CancellationToken ct) => Fail<PagedResult<DefectReportItem>>();
     public Task<PagedResult<TicketReportItem>> QueryTicketsAsync(Guid p, ReportDateRange r, TicketReportFilters f, int s, int t, CancellationToken ct) => Fail<PagedResult<TicketReportItem>>();
+    public Task<PagedResult<AuditEventItem>> QueryAuditEventsAsync(Guid p, ReportDateRange r, AuditEventFilters f, int s, int t, CancellationToken ct) => Fail<PagedResult<AuditEventItem>>();
     public Task<IReadOnlyList<TestOutcomeRow>> GetTestOutcomeRowsAsync(Guid p, ReportDateRange r, CancellationToken ct) => Fail<IReadOnlyList<TestOutcomeRow>>();
     public Task<IReadOnlyList<TestDayOutcomeRow>> GetTestDayOutcomeRowsAsync(Guid p, ReportDateRange r, CancellationToken ct) => Fail<IReadOnlyList<TestDayOutcomeRow>>();
     public Task<IReadOnlyList<TestLastRunRow>> GetTestLastRunsAsync(Guid p, ReportDateRange r, IReadOnlyList<Guid> ids, CancellationToken ct) => Fail<IReadOnlyList<TestLastRunRow>>();

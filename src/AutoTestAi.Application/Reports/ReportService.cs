@@ -12,6 +12,7 @@ public sealed class ReportService : IReportService
 {
     private const int DefaultPageSize = 25;
     private const int MaxPageSize = 100;
+    private const int AuditExportCap = 5000;
 
     private static readonly IReadOnlySet<string> ExecutionStatuses =
         new HashSet<string>(Enum.GetNames<ExecutionStatus>(), StringComparer.OrdinalIgnoreCase);
@@ -144,6 +145,43 @@ public sealed class ReportService : IReportService
         return new FlakyTestsExport(fileName, "text/csv", CsvExporter.ExportFlakyTests(rows));
     }
 
+    // ---------- audit explorer (Phase 4 Slice 2; deterministic, read-only) ----------
+
+    public async Task<PagedResult<AuditEventItem>> GetAuditEventsAsync(
+        Guid projectId, ReportDateRange range, AuditEventFilters filters,
+        int page, int pageSize, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(range);
+        ArgumentNullException.ThrowIfNull(filters);
+        await _authorization.RequireProjectAccessAsync(projectId, Permissions.ReportsRead, ct);
+        var normalized = NormalizeAuditFilters(filters);
+        var (skip, take, pageNumber, size) = Paginate(page, pageSize);
+        var result = await _store.QueryAuditEventsAsync(projectId, range, normalized, skip, take, ct);
+        return new PagedResult<AuditEventItem>(result.Items, result.TotalCount, pageNumber, size);
+    }
+
+    public async Task<AuditEventsExport> ExportAuditEventsCsvAsync(
+        Guid projectId, ReportDateRange range, AuditEventFilters filters,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(range);
+        ArgumentNullException.ThrowIfNull(filters);
+        await _authorization.RequireProjectAccessAsync(projectId, Permissions.ReportsRead, ct);
+        var normalized = NormalizeAuditFilters(filters);
+        // Bounded deterministic export: same filters, CreatedAt/Id order, hard cap.
+        var result = await _store.QueryAuditEventsAsync(projectId, range, normalized, 0, AuditExportCap, ct);
+        var fileName = $"audit-{projectId:N}-{range.From:yyyyMMdd}-{range.To:yyyyMMdd}.csv";
+        return new AuditEventsExport(fileName, "text/csv", CsvExporter.ExportAuditEvents(result.Items));
+    }
+
+    private static AuditEventFilters NormalizeAuditFilters(AuditEventFilters filters)
+    {
+        ValidateFilterLength(filters.Action, 100, "action", "Action filter must be at most 100 characters.");
+        ValidateFilterLength(filters.EntityType, 100, "entityType", "Entity type filter must be at most 100 characters.");
+        return new AuditEventFilters(
+            Normalize(filters.Action), filters.ActorUserId, Normalize(filters.EntityType));
+    }
+
     private async Task<IReadOnlyList<FlakyCandidate>> LoadCandidatesAsync(
         Guid projectId, ReportDateRange range, CancellationToken ct)
     {
@@ -245,6 +283,12 @@ public sealed class ReportService : IReportService
     {
         if (string.IsNullOrWhiteSpace(value)) return;
         if (!allowed.Contains(value.Trim()))
+            throw new ValidationException(message, new[] { new FieldError(field, message) });
+    }
+
+    private static void ValidateFilterLength(string? value, int maxLength, string field, string message)
+    {
+        if (!string.IsNullOrWhiteSpace(value) && value.Trim().Length > maxLength)
             throw new ValidationException(message, new[] { new FieldError(field, message) });
     }
 }

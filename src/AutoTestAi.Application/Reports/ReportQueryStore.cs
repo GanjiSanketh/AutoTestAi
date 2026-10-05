@@ -56,6 +56,16 @@ public interface IReportQueryStore
         Guid projectId, ReportDateRange range, TicketReportFilters filters,
         int skip, int take, CancellationToken ct);
 
+    /// <summary>
+    /// Project-scoped audit events (Phase 4 Slice 2 explorer). Always
+    /// filtered by project server-side; deterministic order (CreatedAt
+    /// descending, Id descending). Projects only safe columns — metadata,
+    /// IP address, and User-Agent are never selected.
+    /// </summary>
+    Task<PagedResult<AuditEventItem>> QueryAuditEventsAsync(
+        Guid projectId, ReportDateRange range, AuditEventFilters filters,
+        int skip, int take, CancellationToken ct);
+
     // ---------- executive analytics primitives (Slice 12; all server-side grouped) ----------
 
     /// <summary>Per-test verdict counts over terminal executions in the window.</summary>

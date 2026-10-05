@@ -810,3 +810,29 @@ dashboard band-count summary on the existing flakiness card. Reads require
 `reports.read`/`dashboard.read` with existing project isolation; no audit
 writes (read-only); no wall-clock dependence (window + CreatedAt/Id
 ordering only); repeated reads over immutable history are identical.
+
+## 20. Audit Explorer Foundation (Phase 4 Slice 2)
+
+Project-scoped read-only audit exploration over the existing
+`audit_events` table — an Audit Explorer foundation, not full enterprise
+compliance:
+
+```text
+React AuditExplorerPage (/projects/:projectId/audit, reports.read UX gate)
+  → GET .../audit/events (filters + pagination) + GET .../audit/export (CSV)
+  → ReportService (reports.read + project access, filter/pagination validation)
+  → IReportQueryStore.QueryAuditEventsAsync (project predicate + CreatedAt
+     window + optional action/actor/entityType, CreatedAt desc + Id desc,
+     safe-column projection only)
+  → PostgreSQL audit_events (existing IX_audit_events_ProjectId_CreatedAt)
+```
+
+Rules: project predicate on every query; existing `ReportDateRange`
+semantics (default 30 days, max 365); pagination follows the report
+convention (default 25, max 100, deterministic CreatedAt/Id order);
+export is synchronous and bounded (5000 rows; columns
+timestamp,action,entityType,entityId,actorUserId only). List and export
+responses never carry metadata, IP address, User-Agent, or secrets;
+reads never generate audit events. No migration, no write-path change,
+no retention/purge, no auth-event logging, no cross-project view —
+all explicitly deferred.

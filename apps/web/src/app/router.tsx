@@ -23,6 +23,7 @@ import { DefectsListPage } from '../features/bugs/DefectsListPage';
 import { DefectDetailsPage } from '../features/bugs/DefectDetailsPage';
 import { TicketsPage } from '../features/tickets/TicketsPage';
 import { ReportsPage } from '../features/reports/ReportsPage';
+import { AuditExplorerPage } from '../features/audit/AuditExplorerPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
 
 /**
@@ -67,6 +68,7 @@ export const router = createBrowserRouter([
           { path: 'projects/:projectId/bugs/:defectId', element: <DefectDetailsPage /> },
           { path: 'tickets', element: <TicketsPage /> },
           { path: 'reports', element: <ReportsPage /> },
+          { path: 'projects/:projectId/audit', element: <AuditExplorerPage /> },
           { path: 'settings', element: <SettingsPage /> },
         ],
       },

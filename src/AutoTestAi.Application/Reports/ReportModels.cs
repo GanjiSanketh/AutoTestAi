@@ -287,4 +287,17 @@ public interface IReportService
     Task<FlakyTestsExport> ExportFlakyTestsCsvAsync(
         Guid projectId, ReportDateRange range, FlakyTestsFilters filters,
         CancellationToken ct);
+
+    /// <summary>
+    /// Audit Explorer list (Phase 4 Slice 2): project-scoped, server-side
+    /// filtered/paginated audit events. Reads never generate audit events.
+    /// </summary>
+    Task<PagedResult<AuditEventItem>> GetAuditEventsAsync(
+        Guid projectId, ReportDateRange range, AuditEventFilters filters,
+        int page, int pageSize, CancellationToken ct);
+
+    /// <summary>Bounded CSV export of the audit explorer (safe fields only).</summary>
+    Task<AuditEventsExport> ExportAuditEventsCsvAsync(
+        Guid projectId, ReportDateRange range, AuditEventFilters filters,
+        CancellationToken ct);
 }

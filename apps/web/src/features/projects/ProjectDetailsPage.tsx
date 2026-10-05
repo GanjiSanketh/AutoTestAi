@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Trash2, Users, Server, KeyRound } from 'lucide-react';
+import { Pencil, Trash2, Users, Server, KeyRound, ScrollText } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -31,6 +31,7 @@ export function ProjectDetailsPage() {
   const setCurrentProjectId = useAppStore((s) => s.setCurrentProjectId);
   const profile = useProfile();
   const canManage = hasPermission(profile.data?.permissions, Permissions.ProjectsManage);
+  const canReadReports = hasPermission(profile.data?.permissions, Permissions.ReportsRead);
   const [confirmArchive, setConfirmArchive] = useState(false);
 
   const project = useQuery({
@@ -91,8 +92,18 @@ export function ProjectDetailsPage() {
           </div>
           <p className="mt-1 font-mono text-xs text-slate-500">{p.key}</p>
         </div>
-        {canManage && (
+        {(canManage || canReadReports) && (
           <div className="flex flex-wrap gap-2">
+            {canReadReports && (
+              <Link to={`/projects/${p.id}/audit`}>
+                <Button variant="secondary" size="sm">
+                  <ScrollText className="h-4 w-4" aria-hidden />
+                  Audit
+                </Button>
+              </Link>
+            )}
+            {canManage && (
+              <>
             <Link to={`/projects/${p.id}/edit`}>
               <Button variant="secondary" size="sm">
                 <Pencil className="h-4 w-4" aria-hidden />
@@ -122,6 +133,8 @@ export function ProjectDetailsPage() {
                 <Trash2 className="h-4 w-4" aria-hidden />
                 Archive
               </Button>
+            )}
+              </>
             )}
           </div>
         )}

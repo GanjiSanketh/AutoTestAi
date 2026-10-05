@@ -98,6 +98,21 @@ export interface FlakinessReportFilters extends DateRange {
   descending?: boolean;
 }
 
+export interface AuditEventItem {
+  id: number;
+  timestamp: string;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  actorUserId: string | null;
+}
+
+export interface AuditEventFilters extends DateRange {
+  action?: string;
+  actor?: string;
+  entityType?: string;
+}
+
 function toQuery(params: Record<string, string | number | boolean | undefined>): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -117,6 +132,8 @@ export const reportKeys = {
     [...reportKeys.all, 'tickets', projectId, filters, page] as const,
   flakiness: (projectId: string, filters: FlakinessReportFilters, page: number) =>
     [...reportKeys.all, 'flakiness', projectId, filters, page] as const,
+  audit: (projectId: string, filters: AuditEventFilters, page: number) =>
+    [...reportKeys.all, 'audit', projectId, filters, page] as const,
 };
 
 /** Centralized reports API surface — no raw fetch calls in components. */
@@ -149,4 +166,10 @@ export const reportEndpoints = {
     ),
   flakinessExportUrl: (projectId: string, filters: FlakinessReportFilters) =>
     `/api/v1/projects/${projectId}/reports/flakiness/export${toQuery({ ...filters })}`,
+  audit: (projectId: string, filters: AuditEventFilters, page: number, pageSize = 25) =>
+    api.get<Paged<AuditEventItem>>(
+      `/api/v1/projects/${projectId}/audit/events${toQuery({ ...filters, page, pageSize })}`,
+    ),
+  auditExportUrl: (projectId: string, filters: AuditEventFilters) =>
+    `/api/v1/projects/${projectId}/audit/export${toQuery({ ...filters })}`,
 };
