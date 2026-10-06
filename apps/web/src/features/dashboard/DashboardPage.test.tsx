@@ -112,6 +112,7 @@ const summaryPayload = (overrides = {}) => ({
   },
   defects: { total: 5, open: 2, inProgress: 1, resolved: 1, closed: 1, rejected: 0, highSeverity: 2 },
   tickets: { total: 3, synced: 2, failed: 1, pending: 0 },
+  jiraStaleness: { totalJiraTests: 5, checkedToday: 2, checkedThisWeek: 3, stale: 1, changed: 1, neverChecked: 1 },
   recentExecutions: [
     {
       id: 'e1', status: 'Failed', testKey: 'LOGIN-001', testTitle: 'Login',

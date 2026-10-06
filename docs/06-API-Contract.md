@@ -503,6 +503,120 @@ limitation. No old/new content, raw ADF, credentials, or raw
 counts only. A `changed` result never mutates anything; the UI hands off to
 `§7.2` (`generate-story?issueKey=`) for explicit fresh proposals.
 
+### 7.4 Jira Freshness Staleness KPI (Phase 4 Slice 8)
+
+The dashboard summary now includes a `JiraStalenessKpis` object:
+
+```json
+{
+  "jiraStaleness": {
+    "totalJiraTests": 5,
+    "checkedToday": 2,
+    "checkedThisWeek": 3,
+    "stale": 1,
+    "changed": 1,
+    "neverChecked": 1
+  }
+}
+```
+
+Rules: `dashboard.read` + project membership; project-scoped; no Jira calls.
+
+### 7.5 Stale Jira Test List (Phase 4 Slice 8)
+
+```http
+GET /api/v1/projects/{projectId}/test-cases/stale-jira?freshnessState=&search=&page=&pageSize=
+```
+
+No request body. Read-only; no Jira calls.
+
+Response (`→ 200`):
+
+```json
+{
+  "items": [
+    {
+      "testCaseId": "uuid",
+      "testKey": "AI-LOGIN-AB12CD",
+      "title": "User login",
+      "versionId": "uuid",
+      "versionNumber": 3,
+      "jiraIssueKey": "PROJ-123",
+      "freshnessState": "stale",
+      "lastCheckedAt": "2026-09-20T12:00:00Z",
+      "changedFieldCount": 2
+    }
+  ],
+  "totalCount": 12,
+  "page": 1,
+  "pageSize": 25
+}
+```
+
+Rules: `dashboard.read` + project membership (admin bypass); anonymous → `401`, unauthorized → `403`.
+
+- Returns only TestCases whose **current/latest** version is Jira-origin.
+- `freshnessState` is one of `changed`, `stale`, `neverChecked`, `current`.
+- `changedFieldCount` is `null` when no check exists or check is `current`.
+- Pagination: `page` (default 1), `pageSize` (default 25, max 100).
+- Deterministic ordering: `changed` → `neverChecked` → `stale` → `current`, then `testKey`.
+- Safe fields only; no Jira description, acceptance criteria, raw ADF, credentials.
+- No Jira call is made by this endpoint.
+
+Filters: `freshnessState` (one of `changed`, `stale`, `neverChecked`, `current`), `search` (testKey, title, jiraIssueKey).
+
+### 7.6 Bulk Jira Freshness Check (Phase 4 Slice 8)
+
+```http
+POST /api/v1/test-cases/jira-change-check/bulk
+```
+
+Request:
+
+```json
+{
+  "versionIds": ["guid", "guid"]
+}
+```
+
+Response (`→ 200`):
+
+```json
+{
+  "results": [
+    {
+      "versionId": "guid",
+      "status": "changed",
+      "changedFields": ["title", "acceptanceCriteria"],
+      "jiraIssueKey": "PROJ-123",
+      "checkedAt": "2026-10-06T12:00:00Z"
+    },
+    {
+      "versionId": "guid",
+      "error": { "code": "RATE_LIMITED", "message": "Jira freshness check rate limit reached." }
+    }
+  ],
+  "summary": { "current": 2, "changed": 1, "errors": 1 }
+}
+```
+
+Rules: `testcases.manage` + project membership; anonymous → `401`, unauthorized → `403`.
+
+- Maximum **25** version IDs per request.
+- Duplicates are deduplicated; processing order is lexicographic.
+- All supplied version IDs must belong to the authorized project.
+- Each version must be the **current/latest** version for its TestCase and carry valid Jira provenance.
+- Sequential processing under the shared **30/min/project Jira-read budget** (imports + checks + bulk checks contend).
+- Rate-limited items return per-item `error.code = "RATE_LIMITED"`; batch continues; no auto-retry.
+- No background job, no scheduler, no automatic retry, no polling.
+- Per-item result: on success `{status, changedFields, jiraIssueKey, checkedAt}`; on error `{error: {code, message}}`.
+- Error codes: `RATE_LIMITED`, `JIRA_NOT_FOUND`, `JIRA_UNAVAILABLE`, `INVALID_PROVENANCE`, `NOT_CURRENT_VERSION`, `CHECK_FAILED`.
+- Aggregate summary: `{current, changed, errors}` equals per-item counts.
+- Audit: `jira-change-check.bulk-requested`, `jira-change-check.bulk-completed`, `jira-change-check.bulk-failed` (metadata only — NOT freshness source-of-truth).
+- Individual `jira-change-check.completed` events remain authoritative for freshness.
+
+Fresh proposals: changed items surface a handoff to `generate-story?issueKey=` (pre-filled, never auto-submitted); existing `Pending` → review → approval → execution path unchanged.
+
 ## 8. Execution
 
 Implemented in Phase 1 Slice 5. Executions bind exactly one immutable

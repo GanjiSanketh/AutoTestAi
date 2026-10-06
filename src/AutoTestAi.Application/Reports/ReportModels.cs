@@ -56,6 +56,15 @@ public sealed record ReportDateRange(DateTimeOffset From, DateTimeOffset To)
 
 // ---------- dashboard DTOs (all database-backed, descriptive only) ----------
 
+/// <summary>Jira freshness KPIs for the current/latest Jira-origin test case versions (Phase 4 Slice 8).</summary>
+public sealed record JiraStalenessKpis(
+    int TotalJiraTests,
+    int CheckedToday,
+    int CheckedThisWeek,
+    int Stale,
+    int Changed,
+    int NeverChecked);
+
 public sealed record TestCaseKpis(int Total, int Approved);
 
 public sealed record ExecutionKpis(
@@ -85,6 +94,21 @@ public sealed record TicketKpis(
 
 /// <summary>Named aggregate bucket (serialized as {name,count}).</summary>
 public sealed record CountItem(string Name, int Count);
+
+/// <summary>
+/// Jira staleness row for a single current Jira-origin test case version (Phase 4 Slice 8).
+/// Derived from local audit events and Jira provenance. No external Jira calls.
+/// </summary>
+public sealed record JiraStalenessRow(
+    Guid TestCaseId,
+    string TestKey,
+    string Title,
+    Guid VersionId,
+    int VersionNumber,
+    string JiraIssueKey,
+    string FreshnessState,
+    DateTimeOffset? LastCheckedAt,
+    int? ChangedFieldCount);
 
 public sealed record TrendPoint(
     string Date,
@@ -138,10 +162,25 @@ public sealed record DashboardSummaryDto(
     ExecutionKpis Executions,
     DefectKpis Defects,
     TicketKpis Tickets,
+    JiraStalenessKpis JiraStaleness,
     IReadOnlyList<RecentExecutionItem> RecentExecutions,
     IReadOnlyList<RecentDefectItem> RecentDefects,
     IReadOnlyList<RecentTicketItem> RecentTickets,
     IReadOnlyList<ActivityItem> RecentActivity);
+
+/// <summary>
+/// Stale Jira test list item (Phase 4 Slice 8). Read-only projection for the stale Jira test list.
+/// </summary>
+public sealed record StaleJiraTestItem(
+    Guid TestCaseId,
+    string TestKey,
+    string Title,
+    Guid VersionId,
+    int VersionNumber,
+    string JiraIssueKey,
+    string FreshnessState,
+    DateTimeOffset? LastCheckedAt,
+    int? ChangedFieldCount);
 
 public sealed record ExecutionTrendDto(
     Guid ProjectId,
@@ -261,7 +300,19 @@ public interface IDashboardService
 
     Task<ReleaseReadinessDto> GetReleaseReadinessAsync(
         Guid projectId, ReportDateRange range, CancellationToken ct);
+
+    /// <summary>
+    /// Jira freshness staleness KPIs (Phase 4 Slice 8). Derived from local
+    /// audit events and Jira provenance on current test case versions.
+    /// No external Jira calls.
+    /// </summary>
+    Task<JiraStalenessKpis> GetJiraStalenessAsync(Guid projectId, CancellationToken ct);
 }
+
+/// <summary>Filters for the stale Jira test list (Phase 4 Slice 8).</summary>
+public sealed record StaleJiraTestsFilters(
+    string? FreshnessState,
+    string? Search);
 
 /// <summary>Read-only operational reports (Slice 8). Paginated, server-side filtered.</summary>
 public interface IReportService
@@ -300,4 +351,12 @@ public interface IReportService
     Task<AuditEventsExport> ExportAuditEventsCsvAsync(
         Guid projectId, ReportDateRange range, AuditEventFilters filters,
         CancellationToken ct);
+
+    /// <summary>
+    /// Stale Jira-origin test list (Phase 4 Slice 8). Project-scoped, server-side
+    /// filtered/paginated. Read-only, no external Jira calls.
+    /// </summary>
+    Task<PagedResult<StaleJiraTestItem>> GetStaleJiraTestsAsync(
+        Guid projectId, StaleJiraTestsFilters filters,
+        int page, int pageSize, CancellationToken ct);
 }

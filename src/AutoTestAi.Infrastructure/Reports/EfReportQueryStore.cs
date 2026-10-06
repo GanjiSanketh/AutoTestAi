@@ -1,5 +1,6 @@
 using AutoTestAi.Application.Common;
 using AutoTestAi.Application.Reports;
+using AutoTestAi.Application.TestCases;
 using AutoTestAi.Domain.Entities;
 using AutoTestAi.Domain.Enums;
 using AutoTestAi.Infrastructure.Persistence;
@@ -759,6 +760,200 @@ public sealed class EfReportQueryStore : IReportQueryStore
                 appliedByDay.TryGetValue((t.Year, t.Month, t.Day), out var v) ? v : 0))
             .ToList();
     }
+
+    /// <summary>
+    /// Jira freshness staleness data for current/latest Jira-origin test case versions (Phase 4 Slice 8).
+    /// Returns the latest completed freshness check per current Jira-origin version.
+    /// Only jira-change-check.completed events are considered.
+    /// </summary>
+    public async Task<IReadOnlyList<JiraStalenessRow>> GetJiraStalenessAsync(Guid projectId, CancellationToken ct)
+    {
+        // 1. Get all test cases in the project with their latest version
+        var latestVersions = await _db.TestCases
+            .Where(tc => tc.ProjectId == projectId)
+            .Select(tc => new
+            {
+                TestCase = new { tc.Id, tc.TestKey, tc.Title },
+                LatestVersion = _db.TestCaseVersions
+                    .Where(v => v.TestCaseId == tc.Id)
+                    .OrderByDescending(v => v.VersionNumber)
+                    .Select(v => new { v.Id, v.VersionNumber, v.GenerationRequest })
+                    .FirstOrDefault()
+            })
+            .ToListAsync(ct);
+
+        // 2. Filter to only those with valid Jira provenance on the latest version
+        var jiraOriginVersions = new List<(Guid TestCaseId, string TestKey, string Title, Guid VersionId, int VersionNumber, string JiraIssueKey)>();
+        foreach (var item in latestVersions)
+        {
+            if (item.LatestVersion is null) continue;
+            var provenance = JiraProvenanceReader.TryRead(item.LatestVersion.GenerationRequest);
+            if (provenance is not null && !string.IsNullOrWhiteSpace(provenance.JiraIssueKey))
+            {
+                jiraOriginVersions.Add((item.TestCase.Id, item.TestCase.TestKey, item.TestCase.Title,
+                    item.LatestVersion.Id, item.LatestVersion.VersionNumber, provenance.JiraIssueKey));
+            }
+        }
+
+        if (jiraOriginVersions.Count == 0)
+            return Array.Empty<JiraStalenessRow>();
+
+        // 3. Get the latest completed freshness check for each Jira-origin version
+        var versionIds = jiraOriginVersions.Select(v => v.VersionId).ToList();
+        var auditEvents = await _db.AuditEvents
+            .Where(a => a.ProjectId == projectId
+                && a.EntityType == "test_case_version"
+                && a.Action == "jira-change-check.completed"
+                && versionIds.Contains(Guid.Parse(a.EntityId!)))
+            .OrderByDescending(a => a.CreatedAt)
+            .Select(a => new
+            {
+                VersionId = Guid.Parse(a.EntityId!),
+                a.CreatedAt,
+                a.MetadataJson
+            })
+            .ToListAsync(ct);
+
+        // 4. Process audit events - keep only the latest completed check per version
+        var latestChecks = new Dictionary<Guid, (DateTimeOffset CreatedAt, string Status, int ChangedFieldCount)>();
+        foreach (var evt in auditEvents)
+        {
+            if (!latestChecks.ContainsKey(evt.VersionId))
+            {
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(evt.MetadataJson!);
+                    var root = doc.RootElement;
+                    var status = root.TryGetProperty("status", out var statusEl) ? statusEl.GetString() : null;
+                    var changedFieldCount = root.TryGetProperty("changedFieldCount", out var countEl) ? countEl.GetInt32() : 0;
+                    if (!string.IsNullOrWhiteSpace(status))
+                    {
+                        latestChecks[evt.VersionId] = (evt.CreatedAt, status, changedFieldCount);
+                    }
+                }
+                catch
+                {
+                    // Malformed metadata - skip
+                }
+            }
+        }
+
+        // 5. Build staleness rows
+        var now = DateTimeOffset.UtcNow;
+        var sevenDaysAgo = now.AddDays(-7);
+        var todayStart = new DateTimeOffset(now.Year, now.Month, now.Day, 0, 0, 0, TimeSpan.Zero);
+        var weekStart = todayStart.AddDays(-7);
+
+        var results = new List<JiraStalenessRow>();
+        foreach (var version in jiraOriginVersions)
+        {
+            var (testCaseId, testKey, title, versionId, versionNumber, jiraIssueKey) = version;
+
+            if (latestChecks.TryGetValue(versionId, out var check))
+            {
+                var (checkedAt, status, changedFieldCount) = check;
+                string freshnessState;
+                if (status == "changed")
+                {
+                    freshnessState = "changed";
+                }
+                else if (checkedAt >= todayStart)
+                {
+                    freshnessState = "current";
+                }
+                else if (checkedAt >= weekStart)
+                {
+                    freshnessState = "current";
+                }
+                else
+                {
+                    freshnessState = "stale";
+                }
+
+                results.Add(new JiraStalenessRow(
+                    TestCaseId: testCaseId,
+                    TestKey: testKey,
+                    Title: title,
+                    VersionId: versionId,
+                    VersionNumber: versionNumber,
+                    JiraIssueKey: jiraIssueKey,
+                    FreshnessState: freshnessState,
+                    LastCheckedAt: checkedAt,
+                    ChangedFieldCount: changedFieldCount));
+            }
+            else
+            {
+                // No completed check found
+                results.Add(new JiraStalenessRow(
+                    TestCaseId: testCaseId,
+                    TestKey: testKey,
+                    Title: title,
+                    VersionId: versionId,
+                    VersionNumber: versionNumber,
+                    JiraIssueKey: jiraIssueKey,
+                    FreshnessState: "neverChecked",
+                    LastCheckedAt: null,
+                    ChangedFieldCount: null));
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Stale Jira-origin test list (Phase 4 Slice 8). Project-scoped, server-side filtered/paginated.
+    /// Returns current/latest Jira-origin test cases with their freshness state.
+    /// </summary>
+    public async Task<PagedResult<StaleJiraTestItem>> GetStaleJiraTestsAsync(
+        Guid projectId, StaleJiraTestsFilters filters, int skip, int take, CancellationToken ct)
+    {
+        // Reuse the staleness computation logic
+        var allRows = await GetJiraStalenessAsync(projectId, CancellationToken.None);
+
+        // Apply filters
+        var query = allRows.AsQueryable();
+        if (!string.IsNullOrWhiteSpace(filters.FreshnessState))
+        {
+            query = query.Where(r => r.FreshnessState == filters.FreshnessState);
+        }
+        if (!string.IsNullOrWhiteSpace(filters.Search))
+        {
+            var term = filters.Search.Trim().ToLower();
+            query = query.Where(r =>
+                r.TestKey.ToLower().Contains(term) ||
+                r.Title.ToLower().Contains(term) ||
+                r.JiraIssueKey.ToLower().Contains(term));
+        }
+
+        // Deterministic ordering: changed -> neverChecked -> stale -> current, then by TestKey
+        var stateOrder = new Dictionary<string, int>
+        {
+            ["changed"] = 0,
+            ["neverChecked"] = 1,
+            ["stale"] = 2,
+            ["current"] = 3
+        };
+        var ordered = query
+            .OrderBy(r => stateOrder.GetValueOrDefault(r.FreshnessState, 4))
+            .ThenBy(r => r.TestKey)
+            .ToList();
+
+        var total = ordered.Count;
+        var page = ordered.Skip(skip).Take(take).ToList();
+
+        var items = page.Select(r => new StaleJiraTestItem(
+            r.TestCaseId,
+            r.TestKey,
+            r.Title,
+            r.VersionId,
+            r.VersionNumber,
+            r.JiraIssueKey,
+            r.FreshnessState,
+            r.LastCheckedAt,
+            r.ChangedFieldCount)).ToList();
+
+        return new PagedResult<StaleJiraTestItem>(items, total, 0, 0);
+    }
 }
 
 /// <summary>Fail-closed store used when no database is configured.</summary>
@@ -798,4 +993,8 @@ public sealed class UnavailableReportQueryStore : IReportQueryStore
     public Task<HealingStats> GetHealingStatsAsync(Guid p, ReportDateRange r, CancellationToken ct) => Fail<HealingStats>();
     public Task<IReadOnlyList<HealingDayRow>> GetHealingByDayAsync(Guid p, ReportDateRange r, CancellationToken ct) => Fail<IReadOnlyList<HealingDayRow>>();
     public Task<IReadOnlyList<TestCaseMetaRow>> GetTestCaseMetaAsync(Guid p, IReadOnlyList<Guid> ids, CancellationToken ct) => Fail<IReadOnlyList<TestCaseMetaRow>>();
+
+    public Task<IReadOnlyList<JiraStalenessRow>> GetJiraStalenessAsync(Guid p, CancellationToken ct) => Fail<IReadOnlyList<JiraStalenessRow>>();
+
+    public Task<PagedResult<StaleJiraTestItem>> GetStaleJiraTestsAsync(Guid p, StaleJiraTestsFilters f, int s, int t, CancellationToken ct) => Fail<PagedResult<StaleJiraTestItem>>();
 }

@@ -137,6 +137,20 @@ public interface IReportQueryStore
     /// <summary>Display metadata for a bounded set of test cases (same project).</summary>
     Task<IReadOnlyList<TestCaseMetaRow>> GetTestCaseMetaAsync(
         Guid projectId, IReadOnlyList<Guid> testCaseIds, CancellationToken ct);
+
+    /// <summary>
+    /// Jira freshness staleness data for current/latest Jira-origin test case versions (Phase 4 Slice 8).
+    /// Returns the latest completed freshness check per current Jira-origin version, keyed by version ID.
+    /// Only jira-change-check.completed events are considered.
+    /// </summary>
+    Task<IReadOnlyList<JiraStalenessRow>> GetJiraStalenessAsync(Guid projectId, CancellationToken ct);
+
+    /// <summary>
+    /// Stale Jira-origin test list (Phase 4 Slice 8). Project-scoped, server-side filtered/paginated.
+    /// Returns current/latest Jira-origin test cases with their freshness state.
+    /// </summary>
+    Task<PagedResult<StaleJiraTestItem>> GetStaleJiraTestsAsync(
+        Guid projectId, StaleJiraTestsFilters filters, int skip, int take, CancellationToken ct);
 }
 
 /// <summary>Status count for one UTC calendar day (month/day parts keep the

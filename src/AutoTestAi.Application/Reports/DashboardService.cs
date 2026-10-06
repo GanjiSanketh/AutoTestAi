@@ -38,14 +38,75 @@ public sealed class DashboardService : IDashboardService
         var executions = await _store.GetExecutionKpisAsync(projectId, range, ct);
         var defects = await _store.GetDefectKpisAsync(projectId, range, ct);
         var tickets = await _store.GetTicketKpisAsync(projectId, range, ct);
+        var jiraStaleness = await _store.GetJiraStalenessAsync(projectId, ct);
         var recentExecutions = await _store.GetRecentExecutionsAsync(projectId, RecentTake, ct);
         var recentDefects = await _store.GetRecentDefectsAsync(projectId, RecentTake, ct);
         var recentTickets = await _store.GetRecentTicketsAsync(projectId, RecentTake, ct);
         var activity = await _store.GetRecentActivityAsync(projectId, range, ActivityTake, ct);
+
+        var jiraStalenessKpis = ComputeJiraStalenessKpis(jiraStaleness);
+
         return new DashboardSummaryDto(
             projectId, range.From, range.To,
             testCases, executions, defects, tickets,
+            jiraStalenessKpis,
             recentExecutions, recentDefects, recentTickets, activity);
+    }
+
+    private static JiraStalenessKpis ComputeJiraStalenessKpis(IReadOnlyList<JiraStalenessRow> rows)
+    {
+        if (rows.Count == 0)
+            return new JiraStalenessKpis(0, 0, 0, 0, 0, 0);
+
+        var now = DateTimeOffset.UtcNow;
+        var todayStart = new DateTimeOffset(now.Year, now.Month, now.Day, 0, 0, 0, TimeSpan.Zero);
+        var weekStart = todayStart.AddDays(-7);
+
+        int totalJiraTests = rows.Count;
+        int checkedToday = 0;
+        int checkedThisWeek = 0;
+        int stale = 0;
+        int changed = 0;
+        int neverChecked = 0;
+
+        foreach (var row in rows)
+        {
+            switch (row.FreshnessState)
+            {
+                case "changed":
+                    changed++;
+                    break;
+                case "neverChecked":
+                    neverChecked++;
+                    break;
+                case "stale":
+                    stale++;
+                    break;
+                case "current":
+                    if (row.LastCheckedAt.HasValue)
+                    {
+                        if (row.LastCheckedAt.Value >= todayStart)
+                            checkedToday++;
+                        if (row.LastCheckedAt.Value >= weekStart)
+                            checkedThisWeek++;
+                    }
+                    break;
+            }
+        }
+
+        return new JiraStalenessKpis(totalJiraTests, checkedToday, checkedThisWeek, stale, changed, neverChecked);
+    }
+
+    /// <summary>
+    /// Jira freshness staleness KPIs (Phase 4 Slice 8). Derived from local
+    /// audit events and Jira provenance on current test case versions.
+    /// No external Jira calls.
+    /// </summary>
+    public async Task<JiraStalenessKpis> GetJiraStalenessAsync(Guid projectId, CancellationToken ct)
+    {
+        await _authorization.RequireProjectAccessAsync(projectId, Permissions.DashboardRead, ct);
+        var rows = await _store.GetJiraStalenessAsync(projectId, ct);
+        return ComputeJiraStalenessKpis(rows);
     }
 
     public async Task<ExecutionTrendDto> GetExecutionTrendAsync(

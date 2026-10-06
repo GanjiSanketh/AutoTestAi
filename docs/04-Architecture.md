@@ -947,3 +947,111 @@ contract. Audit `jira-change-check.requested/completed/failed` carries
 identifiers/counts only. No migration, no new permissions, no persisted
 Story/Requirement, no sync/polling/bulk, no auto-mutation/approval
 /execution — all deferred or prohibited.
+
+## 25. Jira Freshness & Stale Test Visibility (Phase 4 Slice 8)
+
+Human-gated freshness visibility + bounded bulk re-check over current Jira-origin versions — no scheduler, no polling, no auto-sync, no auto-regeneration.
+
+```text
+Dashboard → JiraStalenessKpis (TotalJiraTests, CheckedToday, CheckedThisWeek,
+  Stale, Changed, NeverChecked)
+  → GET /projects/{projectId}/test-cases/stale-jira
+     → paginated stale Jira-origin test list (changed/stale/neverChecked/current)
+     → POST /test-cases/jira-change-check/bulk
+        → sequential (≤25) current-version checks under shared 30/min Jira-read budget
+        → per-item {status: current|changed, changedFields, jiraIssueKey, checkedAt}
+        → changed? "Generate fresh proposals" → generate-story?issueKey= → fresh proposals
+```
+
+### Freshness source of truth
+
+For each TestCase:
+
+1. Resolve the latest/current TestCaseVersion using the repository's authoritative version-ordering convention.
+2. If the latest version is not Jira-origin (`origin != "jira-import"` or no valid `jiraIssueKey`), the TestCase is excluded from Jira freshness entirely.
+3. If the latest version is Jira-origin, use that exact version ID as the freshness identity.
+4. Find the latest `jira-change-check.completed` audit event where:
+   - `entityType = "test_case_version"`
+   - `entityId = EXACT CURRENT VERSION ID`
+   - `action = "jira-change-check.completed"`
+5. Use that event's `status` and `createdAt` to determine freshness.
+
+**Do NOT** use:
+- the latest audit event for the TestCase generally (without version match)
+- `metadataJson.testCaseId` alone (only defensive consistency check)
+- `jira-change-check.failed` events (they do not establish freshness)
+- bulk aggregate audit events (`bulk-completed`, etc.) — these are operational metadata only
+- an older Jira-origin version's check to classify a newer version
+
+### Freshness states (deterministic precedence)
+
+1. **changed** — latest completed check for the current Jira-origin version has `status = "changed"` (remains changed regardless of age)
+2. **neverChecked** — current Jira-origin version has no `jira-change-check.completed` event
+3. **stale** — latest completed check has `status = "current"` and `createdAt` older than 7 days
+4. **current** — latest completed check has `status = "current"` and `createdAt` within 7 days
+
+- A failed check (`jira-change-check.failed`) never resets freshness.
+- An older successful check for Version N does NOT make Version N+1 appear current.
+
+### Dashboard KPI: `JiraStalenessKpis`
+
+`JiraStalenessKpis` extends `DashboardSummaryDto`:
+
+| Field | Meaning |
+|-------|---------|
+| `TotalJiraTests` | TestCases whose latest version is Jira-origin |
+| `CheckedToday` | Latest completed check within today (UTC midnight boundary) |
+| `CheckedThisWeek` | Latest completed check within last 7 days |
+| `Stale` | `current` check older than 7 days |
+| `Changed` | Latest check `status = "changed"` (any age) |
+| `NeverChecked` | No `completed` check for current version |
+
+- Dashboard reads are `dashboard.read` + project membership.
+- Dashboard queries never call Jira; they read local `audit_events` + `test_case_versions`.
+
+### Stale Jira test list
+
+`GET /api/v1/projects/{projectId}/test-cases/stale-jira`
+
+- Requires `dashboard.read` + project membership.
+- Returns paginated list of TestCases whose **current/latest** version is Jira-origin.
+- Filterable by `freshnessState` (`changed`, `stale`, `neverChecked`, `current`).
+- Ordering: `changed` → `neverChecked` → `stale` → `current`, then `TestKey`.
+- Response fields: `testCaseId`, `testKey`, `title`, `versionId`, `versionNumber`, `jiraIssueKey`, `freshnessState`, `lastCheckedAt`, `changedFieldCount`.
+- No Jira calls; read-only.
+
+### Bulk freshness check
+
+`POST /api/v1/test-cases/jira-change-check/bulk`
+
+```json
+{ "versionIds": ["guid", "guid"] }
+```
+
+- Requires `testcases.manage` + project membership.
+- Maximum **25** version IDs per request.
+- Duplicates are deduplicated; lexicographically sorted before processing.
+- Every ID must resolve to a version in the authorized project.
+- Every version must be the **current/latest** version for its TestCase and have valid Jira provenance.
+- Sequential processing (no `Task.WhenAll`), shared **30/min/project** Jira-read budget (contends with imports).
+- Rate-limited items return per-item error; batch continues.
+- No automatic retry, no background job, no scheduler.
+- Deterministic result order matches deduplicated lexicographic input order.
+- Aggregate summary: `{current, changed, errors}`.
+- Audit: `jira-change-check.bulk-requested`, `jira-change-check.bulk-completed`, `jira-change-check.bulk-failed` (metadata only — NOT freshness source-of-truth).
+
+### Fresh proposal handoff
+
+Changed items surface "Generate fresh proposals" linking to:
+`/generate-story?issueKey={jiraIssueKey}` (pre-filled, never auto-submitted).
+Existing `story-test-generation` pipeline → `Pending` → review → approval → execution.
+
+### Security & scope
+
+- `dashboard.read` for dashboard/stale-list; `testcases.manage` for bulk check.
+- Project isolation enforced; IDOR checks on every version ID.
+- Server resolves Jira integration; client never supplies Jira host/credentials.
+- Shared 30/min/project Jira-read limiter (imports + checks + bulk).
+- No raw Jira response, credentials, or SecretReference in responses/audit.
+- No migration, no new tables/columns, no new dependencies.
+- No scheduler, no polling, no webhooks, no auto-sync, no auto-regeneration, no auto-mutation/approval/execution.

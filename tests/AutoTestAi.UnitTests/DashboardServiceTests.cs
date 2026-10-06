@@ -95,6 +95,12 @@ internal sealed class FakeReportQueryStore : IReportQueryStore
         => Task.FromResult<IReadOnlyList<HealingDayRow>>(HealingDays);
     public Task<IReadOnlyList<TestCaseMetaRow>> GetTestCaseMetaAsync(Guid p, IReadOnlyList<Guid> ids, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<TestCaseMetaRow>>(MetaRows.Where(m => ids.Contains(m.TestCaseId)).ToList());
+
+    public Task<IReadOnlyList<JiraStalenessRow>> GetJiraStalenessAsync(Guid p, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<JiraStalenessRow>>(Array.Empty<JiraStalenessRow>());
+
+    public Task<PagedResult<StaleJiraTestItem>> GetStaleJiraTestsAsync(Guid projectId, StaleJiraTestsFilters filters, int skip, int take, CancellationToken ct)
+        => Task.FromResult(new PagedResult<StaleJiraTestItem>(Array.Empty<StaleJiraTestItem>(), 0, 0, 0));
 }
 
 internal sealed class FixedClock : IDateTimeProvider

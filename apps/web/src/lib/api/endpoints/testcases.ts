@@ -60,6 +60,72 @@ export interface JiraChangeCheckResult {
   checkedAt: string;
 }
 
+export interface JiraBulkCheckItemResult {
+  versionId: string;
+  status?: 'current' | 'changed';
+  changedFields?: string[];
+  jiraIssueKey?: string;
+  checkedAt?: string;
+  error?: {
+    code: string;
+    message: string;
+  };
+}
+
+export interface JiraBulkCheckSummary {
+  current: number;
+  changed: number;
+  errors: number;
+}
+
+export interface JiraBulkCheckResult {
+  results: JiraBulkCheckItemResult[];
+  summary: JiraBulkCheckSummary;
+}
+
+export interface JiraBulkCheckSummary {
+  current: number;
+  changed: number;
+  errors: number;
+}
+
+export interface JiraBulkCheckRequest {
+  versionIds: string[];
+}
+
+export interface JiraStalenessKpis {
+  totalJiraTests: number;
+  checkedToday: number;
+  checkedThisWeek: number;
+  stale: number;
+  changed: number;
+  neverChecked: number;
+}
+
+export interface StaleJiraTestItem {
+  testCaseId: string;
+  testKey: string;
+  title: string;
+  versionId: string;
+  versionNumber: number;
+  jiraIssueKey: string;
+  freshnessState: 'changed' | 'stale' | 'neverChecked' | 'current';
+  lastCheckedAt: string | null;
+  changedFieldCount: number | null;
+}
+
+export interface StaleJiraTestsFilters {
+  freshnessState?: string;
+  search?: string;
+}
+
+export interface PagedStaleJiraTests {
+  items: StaleJiraTestItem[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface TestCaseDetails {
   id: string;
   projectId: string;
@@ -161,4 +227,8 @@ export const testcasesEndpoints = {
     api.post<TestCaseVersion>(`/api/v1/test-cases/${id}/review`, { versionId, reviewStatus }),
   checkJiraChanges: (id: string, versionId: string) =>
     api.post<JiraChangeCheckResult>(`/api/v1/test-cases/${id}/versions/${versionId}/jira-change-check`),
+  bulkCheckJiraChanges: (versionIds: string[]) =>
+    api.post<JiraBulkCheckResult>(`/api/v1/test-cases/jira-change-check/bulk`, { versionIds }),
+  getStaleJiraTests: (projectId: string, filters: StaleJiraTestsFilters, page = 1, pageSize = 25) =>
+    api.get<PagedStaleJiraTests>(`/api/v1/projects/${projectId}/test-cases/stale-jira${toQuery({ ...filters, page, pageSize })}`),
 };

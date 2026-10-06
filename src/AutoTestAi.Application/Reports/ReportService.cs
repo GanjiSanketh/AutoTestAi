@@ -291,4 +291,20 @@ public sealed class ReportService : IReportService
         if (!string.IsNullOrWhiteSpace(value) && value.Trim().Length > maxLength)
             throw new ValidationException(message, new[] { new FieldError(field, message) });
     }
+
+    /// <summary>
+    /// Stale Jira-origin test list (Phase 4 Slice 8). Project-scoped, server-side
+    /// filtered/paginated. Read-only, no external Jira calls.
+    /// </summary>
+    public async Task<PagedResult<StaleJiraTestItem>> GetStaleJiraTestsAsync(
+        Guid projectId, StaleJiraTestsFilters filters,
+        int page, int pageSize, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filters);
+        await _authorization.RequireProjectAccessAsync(projectId, Permissions.ReportsRead, ct);
+
+        var (skip, take, pageNumber, size) = Paginate(page, pageSize);
+        var result = await _store.GetStaleJiraTestsAsync(projectId, filters ?? new StaleJiraTestsFilters(null, null), skip, take, ct);
+        return new PagedResult<StaleJiraTestItem>(result.Items, result.TotalCount, pageNumber, size);
+    }
 }

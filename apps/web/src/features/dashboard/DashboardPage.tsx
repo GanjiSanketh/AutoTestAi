@@ -283,7 +283,7 @@ export function DashboardPage() {
         <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
       ) : (
         <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
             <Card>
               <CardHeader>
                 <CardTitle>Test Cases</CardTitle>
@@ -341,9 +341,21 @@ export function DashboardPage() {
                 </p>
               </CardContent>
             </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Jira Staleness</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-semibold text-slate-900">{summary.data.jiraStaleness.totalJiraTests}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {summary.data.jiraStaleness.changed} changed · {summary.data.jiraStaleness.stale} stale · {summary.data.jiraStaleness.neverChecked} never checked
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {summary.data.jiraStaleness.checkedToday} checked today · {summary.data.jiraStaleness.checkedThisWeek} this week
+                </p>
+              </CardContent>
+            </Card>
           </div>
-
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <Card>
               <CardHeader>
                 <CardTitle>Execution Trend</CardTitle>
@@ -406,8 +418,6 @@ export function DashboardPage() {
                 )}
               </CardContent>
             </Card>
-          </div>
-
           <ExecutiveSection projectId={projectId} range={range} enabled={enabled} />
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">

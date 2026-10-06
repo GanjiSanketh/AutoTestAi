@@ -229,6 +229,21 @@ public static class DashboardEndpoints
             .WithName("ExportFlakinessReport")
             .WithSummary("Bounded CSV export of the flakiness report (same filters, TestKey order, max 5000 rows).");
 
+        // Stale Jira test list (Phase 4 Slice 8)
+        projects.MapGet("/{projectId:guid}/test-cases/stale-jira", (
+                Guid projectId,
+                string? freshnessState,
+                string? search,
+                int? page,
+                int? pageSize,
+                IReportService service,
+                CancellationToken ct) =>
+            service.GetStaleJiraTestsAsync(projectId,
+                new StaleJiraTestsFilters(freshnessState, search),
+                page ?? 1, pageSize ?? 25, ct))
+            .WithName("GetStaleJiraTests")
+            .WithSummary("Paginated list of Jira-origin test cases with freshness state (changed, stale, neverChecked, current). No Jira calls.");
+
         return app;
     }
 }

@@ -11,6 +11,7 @@ import { StoryTestGeneratorPage } from '../features/test-cases/StoryTestGenerato
 import { TestCaseNewPage } from '../features/test-cases/TestCaseNewPage';
 import { TestCaseDetailsPage } from '../features/test-cases/TestCaseDetailsPage';
 import { TestCaseEditPage } from '../features/test-cases/TestCaseEditPage';
+import { JiraStaleTestsPage } from '../features/test-cases/JiraStaleTestsPage';
 import { ProjectsPage } from '../features/projects/ProjectsPage';
 import { ProjectNewPage } from '../features/projects/ProjectNewPage';
 import { ProjectDetailsPage } from '../features/projects/ProjectDetailsPage';
@@ -49,6 +50,7 @@ export const router = createBrowserRouter([
           // The repository is project-scoped: /test-cases redirects to project selection.
           { path: 'test-cases', element: <Navigate to="/projects" replace /> },
           { path: 'projects/:projectId/test-cases', element: <TestCaseListPage /> },
+          { path: 'projects/:projectId/test-cases/stale-jira', element: <JiraStaleTestsPage /> },
           { path: 'projects/:projectId/test-cases/generate', element: <AiTestGeneratorPage /> },
           { path: 'projects/:projectId/test-cases/generate-story', element: <StoryTestGeneratorPage /> },
           { path: 'projects/:projectId/test-cases/new', element: <TestCaseNewPage /> },

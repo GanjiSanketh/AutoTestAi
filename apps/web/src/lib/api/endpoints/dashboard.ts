@@ -88,6 +88,15 @@ export interface ActivityEntry {
   createdAt: string;
 }
 
+export interface JiraStalenessKpis {
+  totalJiraTests: number;
+  checkedToday: number;
+  checkedThisWeek: number;
+  stale: number;
+  changed: number;
+  neverChecked: number;
+}
+
 export interface DashboardSummary {
   projectId: string;
   from: string;
@@ -96,6 +105,7 @@ export interface DashboardSummary {
   executions: ExecutionKpis;
   defects: DefectKpis;
   tickets: TicketKpis;
+  jiraStaleness: JiraStalenessKpis;
   recentExecutions: RecentExecution[];
   recentDefects: RecentDefect[];
   recentTickets: RecentTicket[];
