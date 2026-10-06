@@ -37,13 +37,13 @@ const mockedStatus = vi.mocked(testGenerationEndpoints.status);
 const mockedCreate = vi.mocked(testcasesEndpoints.create);
 const mockedProfile = vi.mocked(useProfile);
 
-function renderPage() {
+function renderPage(entry = '/projects/p1/test-cases/generate-story') {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={['/projects/p1/test-cases/generate-story']}>
+      <MemoryRouter initialEntries={[entry]}>
         <Routes>
           <Route path="/projects/:projectId/test-cases/generate-story" element={<StoryTestGeneratorPage />} />
         </Routes>
@@ -362,5 +362,25 @@ describe('StoryTestGeneratorPage', () => {
         }),
       ),
     );
+  });
+
+  it('prefills the Jira key from the issueKey query parameter', async () => {
+    profileWith([Permissions.TestCasesManage, Permissions.TestCasesRead]);
+    renderPage('/projects/p1/test-cases/generate-story?issueKey=PROJ-9');
+    expect((screen.getByLabelText('Jira issue key') as HTMLInputElement).value).toBe('PROJ-9');
+  });
+
+  it('does not auto-submit from the query parameter', async () => {
+    profileWith([Permissions.TestCasesManage, Permissions.TestCasesRead]);
+    renderPage('/projects/p1/test-cases/generate-story?issueKey=PROJ-9');
+    await waitFor(() => expect(screen.queryByLabelText('Jira issue key')).not.toBeNull());
+    expect(mockedJiraGenerate).not.toHaveBeenCalled();
+    expect(mockedStoryGenerate).not.toHaveBeenCalled();
+  });
+
+  it('starts empty without the query parameter', async () => {
+    profileWith([Permissions.TestCasesManage, Permissions.TestCasesRead]);
+    renderPage();
+    expect((screen.getByLabelText('Jira issue key') as HTMLInputElement).value).toBe('');
   });
 });

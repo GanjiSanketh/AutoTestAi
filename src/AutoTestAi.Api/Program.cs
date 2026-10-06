@@ -226,6 +226,7 @@ app.MapV1Endpoints();
 app.MapAuthEndpoints();
 app.MapProjectEndpoints();
 app.MapTestCaseEndpoints();
+app.MapJiraChangeCheckEndpoints();
 app.MapTestGenerationEndpoints();
 app.MapStoryTestGenerationEndpoints();
 app.MapJiraStoryImportEndpoints();

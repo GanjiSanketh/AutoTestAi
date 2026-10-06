@@ -8,7 +8,8 @@ public sealed record JiraImportMetadata(
     string IssueKey,
     string IssueType,
     string BaseUrlHost,
-    string FetchedAt);
+    string FetchedAt,
+    string? NormalizerVersion = null);
 
 /// <summary>
 /// Jira story-import input (Phase 4 Slice 5 §17). The client supplies only

@@ -53,6 +53,13 @@ export interface TestCaseVersion {
   jiraProvenance?: JiraProvenance | null;
 }
 
+export interface JiraChangeCheckResult {
+  status: 'current' | 'changed';
+  changedFields: string[];
+  jiraIssueKey: string;
+  checkedAt: string;
+}
+
 export interface TestCaseDetails {
   id: string;
   projectId: string;
@@ -152,4 +159,6 @@ export const testcasesEndpoints = {
     api.get<TestCaseVersion>(`/api/v1/test-cases/${id}/versions/${versionId}`),
   review: (id: string, versionId: string, reviewStatus: string) =>
     api.post<TestCaseVersion>(`/api/v1/test-cases/${id}/review`, { versionId, reviewStatus }),
+  checkJiraChanges: (id: string, versionId: string) =>
+    api.post<JiraChangeCheckResult>(`/api/v1/test-cases/${id}/versions/${versionId}/jira-change-check`),
 };

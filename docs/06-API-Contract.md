@@ -469,6 +469,40 @@ gate). Audit `jira-story-import.requested/completed/failed` carries
 counts/lengths only. No migration, no persisted story, no JQL/bulk import,
 no bidirectional sync.
 
+### 7.3 Jira Freshness Check (Phase 4 Slice 7, human-gated)
+
+```http
+POST /api/v1/test-cases/{testCaseId}/versions/{versionId}/jira-change-check
+```
+
+No request body. Read-only: one Jira GET, zero AI calls, nothing persisted.
+
+```json
+{
+  "status": "changed",
+  "changedFields": ["description", "acceptanceCriteria"],
+  "jiraIssueKey": "PROJ-123",
+  "checkedAt": "2026-10-06T12:00:00Z"
+}
+```
+
+Rules: `testcases.manage` + project membership (the check performs an
+external Jira request against the shared 30/min/project Jira-read budget —
+imports and checks contend for it; no auto-retry); anonymous → `401`,
+unauthorized → `403`. The version must belong to the test case and carry
+Jira provenance, otherwise `404` (`JIRA_PROVENANCE_NOT_FOUND`, no Jira
+call). `status` is `current`/`changed`; `changedFields` is drawn from
+`title`/`description`/`acceptanceCriteria`/`issueType` in that order (criteria
+order is significant). Comparison is stored normalized snapshot vs freshly
+normalized issue (title/description/criteria/type only); truncation bounds
+apply, so changes outside retained content may read `current` — documented
+limitation. No old/new content, raw ADF, credentials, or raw
+`GenerationRequest` is ever returned. Jira `404` → opaque `404`; `401/403`
+→ `502`; `429` → `429`; `5xx`/timeout/malformed → `502/503`. Audit
+`jira-change-check.requested/completed/failed` carries identifiers and
+counts only. A `changed` result never mutates anything; the UI hands off to
+`§7.2` (`generate-story?issueKey=`) for explicit fresh proposals.
+
 ## 8. Execution
 
 Implemented in Phase 1 Slice 5. Executions bind exactly one immutable

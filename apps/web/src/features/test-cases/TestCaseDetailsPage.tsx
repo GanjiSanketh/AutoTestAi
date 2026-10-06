@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Play, Trash2 } from 'lucide-react';
+import { Pencil, Play, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -12,6 +12,7 @@ import { ApiError } from '../../lib/api/client';
 import {
   testcaseKeys,
   testcasesEndpoints,
+  type JiraChangeCheckResult,
   type TestCaseVersion,
 } from '../../lib/api/endpoints/testcases';
 import { executionEndpoints } from '../../lib/api/endpoints/executions';
@@ -61,6 +62,95 @@ function MetaRow({ label, value, mono }: { label: string; value?: string | null;
   );
 }
 
+const CHANGE_FIELD_LABELS: Record<string, string> = {
+  title: 'Title',
+  description: 'Description',
+  acceptanceCriteria: 'Acceptance criteria',
+  issueType: 'Issue type',
+};
+
+function changeCheckErrorMessage(error: ApiError): string {
+  if (error.status === 429 || error.code === 'RATE_LIMITED')
+    return 'Jira read rate limit reached. Wait a moment and retry manually.';
+  if (error.status === 404)
+    return error.code === 'JIRA_PROVENANCE_NOT_FOUND'
+      ? 'This version has no Jira baseline to check.'
+      : 'Jira issue not found in the configured project.';
+  if (error.status === 409) return error.message;
+  if (error.code === 'JIRA_AUTH_FAILED' || error.code === 'JIRA_FORBIDDEN' || error.code === 'JIRA_UNAVAILABLE')
+    return error.message;
+  return `Jira check failed: ${error.message}`;
+}
+
+/**
+ * Human-gated Jira freshness check for one Jira-generated version.
+ * Read-only: one server-side Jira GET, zero AI calls, nothing persisted.
+ * A changed result only navigates to the existing generator (prefilled);
+ * proposals, save, review, and execution stay on the existing paths.
+ */
+function JiraChangeCheck({
+  versionId,
+  issueKey,
+  checking,
+  result,
+  error,
+  onCheck,
+  onFreshProposals,
+}: {
+  versionId: string;
+  issueKey: string;
+  checking: boolean;
+  result: JiraChangeCheckResult | null;
+  error: ApiError | null;
+  onCheck: (versionId: string) => void;
+  onFreshProposals: (issueKey: string) => void;
+}) {
+  return (
+    <div className="mt-2 space-y-2 border-t border-slate-200 pt-2">
+      {!result && !error && (
+        <Button variant="secondary" size="sm" disabled={checking} onClick={() => onCheck(versionId)}>
+          <RefreshCw className={`h-4 w-4${checking ? ' animate-spin' : ''}`} aria-hidden />
+          {checking ? 'Checking…' : 'Check for Jira changes'}
+        </Button>
+      )}
+      {error && (
+        <div role="alert" className="space-y-2">
+          <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            {changeCheckErrorMessage(error)}
+          </p>
+          <Button variant="secondary" size="sm" disabled={checking} onClick={() => onCheck(versionId)}>
+            <RefreshCw className={`h-4 w-4${checking ? ' animate-spin' : ''}`} aria-hidden />
+            Retry check
+          </Button>
+        </div>
+      )}
+      {result && result.status === 'current' && (
+        <p className="text-sm text-slate-600" aria-live="polite">
+          <Badge tone="success">Jira issue is up to date</Badge>{' '}
+          <span className="font-mono text-xs text-slate-400">{result.checkedAt}</span>
+        </p>
+      )}
+      {result && result.status === 'changed' && (
+        <div className="space-y-2" aria-live="polite">
+          <p className="text-sm text-slate-700">
+            <Badge tone="warning">Jira issue has changed</Badge>
+          </p>
+          <p className="text-xs text-slate-500">
+            Changed: {result.changedFields.map((f) => CHANGE_FIELD_LABELS[f] ?? f).join(', ')}
+          </p>
+          <Button variant="ai" size="sm" onClick={() => onFreshProposals(result.jiraIssueKey)}>
+            <RefreshCw className="h-4 w-4" aria-hidden />
+            Generate fresh proposals
+          </Button>
+          <p className="text-xs text-slate-400">
+            Opens the story generator with {issueKey} prefilled. Nothing is generated until you submit there.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TestCaseDetailsPage() {
   const { projectId = '', testCaseId = '' } = useParams();
   const navigate = useNavigate();
@@ -74,6 +164,10 @@ export function TestCaseDetailsPage() {
   const [reviewStatus, setReviewStatus] = useState('Approved');
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [checkingVersionId, setCheckingVersionId] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState<JiraChangeCheckResult | null>(null);
+  const [checkError, setCheckError] = useState<ApiError | null>(null);
 
   const testCase = useQuery({
     queryKey: testcaseKeys.details(testCaseId),
@@ -93,6 +187,21 @@ export function TestCaseDetailsPage() {
     void queryClient.invalidateQueries({ queryKey: testcaseKeys.details(testCaseId) });
     void queryClient.invalidateQueries({ queryKey: testcaseKeys.versions(testCaseId) });
     void queryClient.invalidateQueries({ queryKey: testcaseKeys.all });
+  };
+
+  const runChangeCheck = async (versionId: string) => {
+    if (checking) return;
+    setChecking(true);
+    setCheckError(null);
+    setCheckingVersionId(versionId);
+    try {
+      setCheckResult(await testcasesEndpoints.checkJiraChanges(testCaseId, versionId));
+    } catch (error) {
+      setCheckResult(null);
+      setCheckError(error instanceof ApiError ? error : new ApiError(0, 'UNKNOWN', 'Check failed.'));
+    } finally {
+      setChecking(false);
+    }
   };
 
   const review = useMutation({
@@ -287,6 +396,21 @@ export function TestCaseDetailsPage() {
                     <p className="mt-1 text-xs text-slate-400">
                       Historical import record only — Jira is not queried to display this.
                     </p>
+                    {canManage && (
+                      <JiraChangeCheck
+                        versionId={selectedVersion.id}
+                        issueKey={selectedVersion.jiraProvenance.jiraIssueKey}
+                        checking={checking && checkingVersionId === selectedVersion.id}
+                        result={checkingVersionId === selectedVersion.id ? checkResult : null}
+                        error={checkingVersionId === selectedVersion.id ? checkError : null}
+                        onCheck={() => void runChangeCheck(selectedVersion.id)}
+                        onFreshProposals={(key) =>
+                          navigate(
+                            `/projects/${projectId}/test-cases/generate-story?issueKey=${encodeURIComponent(key)}`,
+                          )
+                        }
+                      />
+                    )}
                   </div>
                 )}
               </>

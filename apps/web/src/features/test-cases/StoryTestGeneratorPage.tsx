@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -222,7 +222,11 @@ export function StoryTestGeneratorPage() {
   const [priority, setPriority] = useState('');
   const [additionalContext, setAdditionalContext] = useState('');
   const [maxProposals, setMaxProposals] = useState('10');
-  const [issueKey, setIssueKey] = useState('');
+  // Prefilled (editable, never auto-submitted) when arriving from a
+  // version's "Generate fresh proposals" handoff (?issueKey=PROJ-123).
+  // Server-side normalization/validation remains authoritative.
+  const [searchParams] = useSearchParams();
+  const [issueKey, setIssueKey] = useState(() => searchParams.get('issueKey') ?? '');
   const [jiraClientError, setJiraClientError] = useState<string | undefined>(undefined);
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
   const [result, setResult] = useState<StoryTestGenerationResult | null>(null);

@@ -917,5 +917,33 @@ Rules: raw `generation_request` is never returned; only `origin`,
 `jiraIssueKey/Type/BaseUrlHost/FetchedAt` are exposed, `testcases.read`
 gated, project-scoped; reads generate no audit events; malformed history
 never breaks reads. No migration (no GIN index), no new permissions, no
-persisted Story/Requirement, no change detection, no regeneration, no
-sync — all deferred.
+persisted Story/Requirement — all deferred.
+
+## 24. Jira Freshness Check + Fresh Proposals (Phase 4 Slice 7)
+
+Human-gated freshness loop over Slice-5/6 provenance — one Jira GET, zero
+AI calls, nothing persisted, nothing mutated:
+
+```text
+Detail "Check for Jira changes" (testcases.manage UX gate)
+  → POST .../test-cases/{id}/versions/{vid}/jira-change-check
+  → JiraChangeCheckService (manage + membership, version↔case binding,
+     Jira baseline required else 404 JIRA_PROVENANCE_NOT_FOUND, integration
+     resolution, shared 30/min Jira-read guard, single GetIssueAsync,
+     same-project check, SAME JiraStoryNormalizer, pure field comparison)
+  → {status: current|changed, changedFields: title/description/
+     acceptanceCriteria/issueType, jiraIssueKey, checkedAt}
+  → changed? "Generate fresh proposals" navigates to generate-story
+     (?issueKey= prefilled, never auto-submitted) → existing §7.2 pipeline
+     → transient proposals → Pending save → review → Approved → execute
+```
+
+Rules: compared fields are title/description/criteria (order-sensitive)
+/issueType only; identity and generation metadata ignored; truncation bounds
+apply (changes outside retained content may read `current`). New Jira
+provenance stamps `normalizerVersion: jira-story-normalizer-v1` for future
+compatibility; legacy rows without it check best-effort against the current
+contract. Audit `jira-change-check.requested/completed/failed` carries
+identifiers/counts only. No migration, no new permissions, no persisted
+Story/Requirement, no sync/polling/bulk, no auto-mutation/approval
+/execution — all deferred or prohibited.

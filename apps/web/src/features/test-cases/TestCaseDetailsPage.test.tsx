@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TestCaseDetailsPage } from './TestCaseDetailsPage';
 import { testcasesEndpoints } from '../../lib/api/endpoints/testcases';
 import { executionEndpoints } from '../../lib/api/endpoints/executions';
 import { mobileEndpoints } from '../../lib/api/endpoints/mobile';
 import { useProfile } from '../../lib/auth/useProfile';
+import { ApiError } from '../../lib/api/client';
 import { Permissions } from '../../lib/auth/permissions';
 
 vi.mock('../../lib/api/endpoints/testcases', () => ({
@@ -20,6 +21,7 @@ vi.mock('../../lib/api/endpoints/testcases', () => ({
     versions: vi.fn(),
     review: vi.fn(),
     remove: vi.fn(),
+    checkJiraChanges: vi.fn(),
   },
 }));
 
@@ -56,6 +58,7 @@ vi.mock('./SourceEditor', async (importOriginal) => {
 const mockedGet = vi.mocked(testcasesEndpoints.get);
 const mockedVersions = vi.mocked(testcasesEndpoints.versions);
 const mockedReview = vi.mocked(testcasesEndpoints.review);
+const mockedCheck = vi.mocked(testcasesEndpoints.checkJiraChanges);
 const mockedProfile = vi.mocked(useProfile);
 
 const details = {
@@ -133,6 +136,11 @@ function renderPage() {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
+
+function PrefillMarker() {
+  const [params] = useSearchParams();
+  return <div>prefill:{params.get('issueKey')}</div>;
 }
 
 describe('TestCaseDetailsPage', () => {
@@ -280,5 +288,157 @@ describe('TestCaseDetailsPage', () => {
     expect(screen.queryByText('SECRET-CRITERION')).toBeNull();
     expect(screen.queryByText('Raw title')).toBeNull();
     expect(screen.queryByText(/Generated from PROJ-9/)).not.toBeNull();
+  });
+
+  const jiraVersions = [
+    {
+      ...versions[0],
+      jiraProvenance: {
+        origin: 'jira-import',
+        jiraIssueKey: 'PROJ-9',
+        jiraIssueType: 'Story',
+        jiraBaseUrlHost: 'company.atlassian.net',
+        jiraFetchedAt: '2026-10-06T00:00:00Z',
+      },
+    },
+    { ...versions[1], jiraProvenance: null },
+  ];
+
+  it('shows the check action for Jira versions with manage permission', async () => {
+    profileWith([Permissions.TestCasesRead, Permissions.TestCasesManage]);
+    mockedVersions.mockResolvedValue(jiraVersions as never);
+    renderPage();
+    await waitFor(() => expect(screen.queryByText(/Generated from PROJ-9/)).not.toBeNull());
+    expect(screen.getByRole('button', { name: /Check for Jira changes/ })).toBeTruthy();
+    expect(mockedCheck).not.toHaveBeenCalled();
+  });
+
+  it('hides the check action for non-Jira versions', async () => {
+    profileWith([Permissions.TestCasesRead, Permissions.TestCasesManage]);
+    mockedVersions.mockResolvedValue([
+      { ...versions[0], jiraProvenance: null },
+      {
+        ...versions[1],
+        jiraProvenance: {
+          origin: 'jira-import',
+          jiraIssueKey: 'PROJ-9',
+          jiraIssueType: null,
+          jiraBaseUrlHost: null,
+          jiraFetchedAt: null,
+        },
+      },
+    ] as never);
+    renderPage();
+    await waitFor(() => expect(screen.queryByText('Version history')).not.toBeNull());
+    expect(screen.queryByRole('button', { name: /Check for Jira changes/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /v1/ }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Check for Jira changes/ })).toBeTruthy(),
+    );
+  });
+
+  it('hides the check action for read-only viewers', async () => {
+    profileWith([Permissions.TestCasesRead]);
+    mockedVersions.mockResolvedValue(jiraVersions as never);
+    renderPage();
+    await waitFor(() => expect(screen.queryByText(/Generated from PROJ-9/)).not.toBeNull());
+    expect(screen.queryByRole('button', { name: /Check for Jira changes/ })).toBeNull();
+  });
+
+  it('renders the current result without a handoff', async () => {
+    profileWith([Permissions.TestCasesRead, Permissions.TestCasesManage]);
+    mockedVersions.mockResolvedValue(jiraVersions as never);
+    mockedCheck.mockResolvedValue({
+      status: 'current',
+      changedFields: [],
+      jiraIssueKey: 'PROJ-9',
+      checkedAt: '2026-10-06T12:00:00Z',
+    });
+    renderPage();
+    await waitFor(() => expect(screen.queryByText(/Generated from PROJ-9/)).not.toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: /Check for Jira changes/ }));
+    expect(await screen.findByText('Jira issue is up to date')).toBeTruthy();
+    expect(mockedCheck).toHaveBeenCalledWith('c1', 'v2');
+    expect(screen.queryByRole('button', { name: /Generate fresh proposals/ })).toBeNull();
+  });
+
+  it('renders changed fields with a handoff action', async () => {
+    profileWith([Permissions.TestCasesRead, Permissions.TestCasesManage]);
+    mockedVersions.mockResolvedValue(jiraVersions as never);
+    mockedCheck.mockResolvedValue({
+      status: 'changed',
+      changedFields: ['title', 'description'],
+      jiraIssueKey: 'PROJ-9',
+      checkedAt: '2026-10-06T12:00:00Z',
+    });
+    renderPage();
+    await waitFor(() => expect(screen.queryByText(/Generated from PROJ-9/)).not.toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: /Check for Jira changes/ }));
+    expect(await screen.findByText('Jira issue has changed')).toBeTruthy();
+    expect(screen.getByText(/Title, Description/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Generate fresh proposals/ })).toBeTruthy();
+  });
+
+  it('prevents duplicate submissions while checking', async () => {
+    profileWith([Permissions.TestCasesRead, Permissions.TestCasesManage]);
+    mockedVersions.mockResolvedValue(jiraVersions as never);
+    mockedCheck.mockReturnValue(new Promise(() => {}));
+    renderPage();
+    await waitFor(() => expect(screen.queryByText(/Generated from PROJ-9/)).not.toBeNull());
+    const button = screen.getByRole('button', { name: /Check for Jira changes/ });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.queryByText('Checking…')).not.toBeNull());
+    expect(mockedCheck).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders safe errors with retry', async () => {
+    profileWith([Permissions.TestCasesRead, Permissions.TestCasesManage]);
+    mockedVersions.mockResolvedValue(jiraVersions as never);
+    mockedCheck.mockRejectedValue(new ApiError(429, 'RATE_LIMITED', 'Slow down.'));
+    renderPage();
+    await waitFor(() => expect(screen.queryByText(/Generated from PROJ-9/)).not.toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: /Check for Jira changes/ }));
+    expect(await screen.findByText(/rate limit reached/)).toBeTruthy();
+    mockedCheck.mockResolvedValue({
+      status: 'current',
+      changedFields: [],
+      jiraIssueKey: 'PROJ-9',
+      checkedAt: '2026-10-06T12:00:00Z',
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Retry check/ }));
+    expect(await screen.findByText('Jira issue is up to date')).toBeTruthy();
+    expect(mockedCheck).toHaveBeenCalledTimes(2);
+  });
+
+  it('navigates to the generator with the issue key prefilled', async () => {
+    profileWith([Permissions.TestCasesRead, Permissions.TestCasesManage]);
+    mockedVersions.mockResolvedValue(jiraVersions as never);
+    mockedCheck.mockResolvedValue({
+      status: 'changed',
+      changedFields: ['title'],
+      jiraIssueKey: 'PROJ-9',
+      checkedAt: '2026-10-06T12:00:00Z',
+    });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/projects/p1/test-cases/c1']}>
+          <Routes>
+            <Route path="/projects/:projectId/test-cases/:testCaseId" element={<TestCaseDetailsPage />} />
+            <Route
+              path="/projects/:projectId/test-cases/generate-story"
+              element={<PrefillMarker />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.queryByText(/Generated from PROJ-9/)).not.toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: /Check for Jira changes/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Generate fresh proposals/ }));
+    expect(await screen.findByText('prefill:PROJ-9')).toBeTruthy();
   });
 });

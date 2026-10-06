@@ -157,7 +157,8 @@ public sealed class JiraStoryImportService : IJiraStoryImportService
                 issue.IssueKey.Trim().ToUpperInvariant(),
                 normalized.IssueType,
                 ExtractHost(config.BaseUrl),
-                fetchedAt.ToString("o")));
+                fetchedAt.ToString("o"),
+                JiraStoryNormalizer.NormalizerVersion));
 
         StoryTestGenerationResult result;
         try

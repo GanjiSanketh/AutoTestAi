@@ -44,6 +44,14 @@ public sealed record JiraNormalizedStory(
 /// </summary>
 public static partial class JiraStoryNormalizer
 {
+    /// <summary>
+    /// Fixed version of the Jira story normalization contract
+    /// (Phase 4 Slice 7 §15). Stamped into new Jira-generation provenance
+    /// as future compatibility metadata; never a reason to reject legacy
+    /// checks, which run against the current known contract best-effort.
+    /// </summary>
+    public const string NormalizerVersion = "jira-story-normalizer-v1";
+
     public const int MaxTitleLength = 200;
     public const int MaxDescriptionLength = 4000;
     public const int MaxCriteria = 50;

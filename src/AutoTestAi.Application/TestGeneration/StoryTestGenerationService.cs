@@ -253,6 +253,11 @@ public sealed class StoryTestGenerationService : IAiStoryTestGenerator
             payload["jiraIssueType"] = R(jira.IssueType);
             payload["jiraBaseUrlHost"] = R(jira.BaseUrlHost);
             payload["jiraFetchedAt"] = R(jira.FetchedAt);
+            // Phase 4 Slice 7 §15: informational comparison metadata for
+            // future normalization contracts. Legacy rows without it remain
+            // fully checkable; never backfilled, never required.
+            if (!string.IsNullOrWhiteSpace(jira.NormalizerVersion))
+                payload["normalizerVersion"] = R(jira.NormalizerVersion);
         }
         payload["generationId"] = generationId.ToString();
         payload["proposalId"] = proposalId;
