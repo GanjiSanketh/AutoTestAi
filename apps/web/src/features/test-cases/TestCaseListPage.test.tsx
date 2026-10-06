@@ -153,4 +153,55 @@ describe('TestCaseListPage', () => {
     renderPage();
     await waitFor(() => expect(screen.queryByText('No access')).not.toBeNull());
   });
+
+  it('renders the Jira issue key filter and queries server-side', async () => {
+    profileWith([Permissions.TestCasesRead]);
+    mockedList.mockResolvedValue({ items: [item()], totalCount: 1, page: 1, pageSize: 25 });
+    renderPage();
+    expect(screen.getByLabelText('Jira issue key filter')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Jira issue key filter'), { target: { value: 'PROJ-123' } });
+    await waitFor(() => {
+      const calls = mockedList.mock.calls as unknown as [string, Record<string, string>][];
+      const matched = calls.some(([, filters]) => filters.jiraIssueKey === 'PROJ-123');
+      expect(matched).toBe(true);
+    });
+    // Active filter context is visible; no Jira system is contacted by the UI.
+    expect(await screen.findByText(/Showing tests from/)).toBeTruthy();
+  });
+
+  it('shows a Jira-specific empty state', async () => {
+    profileWith([Permissions.TestCasesRead]);
+    mockedList.mockResolvedValue({ items: [], totalCount: 0, page: 1, pageSize: 25 });
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Jira issue key filter'), { target: { value: 'PROJ-404' } });
+    expect(await screen.findByText('No tests were generated from PROJ-404.')).toBeTruthy();
+  });
+
+  it('clearing the Jira filter restores unfiltered behavior', async () => {
+    profileWith([Permissions.TestCasesRead]);
+    mockedList.mockResolvedValue({ items: [item()], totalCount: 1, page: 1, pageSize: 25 });
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Jira issue key filter'), { target: { value: 'PROJ-123' } });
+    expect(await screen.findByText(/Showing tests from/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Jira issue key filter'), { target: { value: '' } });
+    // Committed filter clears (banner disappears); the cached unfiltered
+    // result renders without requiring a refetch.
+    await waitFor(() => expect(screen.queryByText(/Showing tests from/)).toBeNull());
+    expect(screen.queryByText('LOGIN-001')).not.toBeNull();
+  });
+
+  it('combines the Jira filter with existing filters', async () => {
+    profileWith([Permissions.TestCasesRead]);
+    mockedList.mockResolvedValue({ items: [], totalCount: 0, page: 1, pageSize: 25 });
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Framework filter'), { target: { value: 'playwright' } });
+    fireEvent.change(screen.getByLabelText('Jira issue key filter'), { target: { value: 'PROJ-123' } });
+    await waitFor(() => {
+      const calls = mockedList.mock.calls as unknown as [string, Record<string, string>][];
+      const matched = calls.some(
+        ([, filters]) => filters.framework === 'playwright' && filters.jiraIssueKey === 'PROJ-123',
+      );
+      expect(matched).toBe(true);
+    });
+  });
 });

@@ -256,6 +256,39 @@ export function TestCaseDetailsPage() {
                     Generated content requires human review before use.
                   </p>
                 )}
+                {selectedVersion.jiraProvenance && (
+                  <div
+                    className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
+                    aria-label={`Generated from ${selectedVersion.jiraProvenance.jiraIssueKey}`}
+                  >
+                    <p className="flex flex-wrap items-center gap-2 text-sm text-slate-700">
+                      <Badge tone="neutral">Generated from {selectedVersion.jiraProvenance.jiraIssueKey}</Badge>
+                    </p>
+                    <dl className="mt-1 space-y-0.5 text-xs text-slate-500">
+                      {selectedVersion.jiraProvenance.jiraIssueType && (
+                        <div className="flex gap-1">
+                          <dt className="font-medium">Issue type:</dt>
+                          <dd>{selectedVersion.jiraProvenance.jiraIssueType}</dd>
+                        </div>
+                      )}
+                      {selectedVersion.jiraProvenance.jiraBaseUrlHost && (
+                        <div className="flex gap-1">
+                          <dt className="font-medium">Jira host:</dt>
+                          <dd className="font-mono">{selectedVersion.jiraProvenance.jiraBaseUrlHost}</dd>
+                        </div>
+                      )}
+                      {selectedVersion.jiraProvenance.jiraFetchedAt && (
+                        <div className="flex gap-1">
+                          <dt className="font-medium">Imported:</dt>
+                          <dd className="font-mono">{selectedVersion.jiraProvenance.jiraFetchedAt}</dd>
+                        </div>
+                      )}
+                    </dl>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Historical import record only — Jira is not queried to display this.
+                    </p>
+                  </div>
+                )}
               </>
             )}
           </CardContent>

@@ -32,7 +32,8 @@ public sealed record TestCaseVersionDto(
     long? GenerationLatencyMs,
     string ReviewStatus,
     Guid? CreatedBy,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    JiraProvenanceDto? JiraProvenance = null);
 
 public sealed record TestCaseDto(
     Guid Id,
@@ -60,7 +61,8 @@ public sealed record TestCaseFilters(
     string? Priority,
     string? Framework,
     string? Platform,
-    string? ReviewStatus);
+    string? ReviewStatus,
+    string? JiraIssueKey = null);
 
 // ---------- Commands (server decides identity, project, version sequence) ----------
 

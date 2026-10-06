@@ -44,6 +44,9 @@ internal sealed class FakeTestCaseStore : ITestCaseStore
             query = query.Where(t => t.Platform != null && t.Platform.Contains(filter.Platform, StringComparison.OrdinalIgnoreCase));
         if (filter.ReviewStatus is not null)
             query = query.Where(t => Latest(t.Id)?.ReviewStatus.ToString() == filter.ReviewStatus);
+        if (filter.JiraIssueKey is not null)
+            query = query.Where(t => Versions.Any(v =>
+                v.TestCaseId == t.Id && JiraProvenanceReader.Matches(v.GenerationRequest, filter.JiraIssueKey)));
         return query.ToList();
     }
 

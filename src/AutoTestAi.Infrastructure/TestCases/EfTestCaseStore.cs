@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AutoTestAi.Application.Common;
 using AutoTestAi.Application.TestCases;
 using AutoTestAi.Domain.Entities;
@@ -129,7 +130,51 @@ public sealed class EfTestCaseStore : ITestCaseStore
                 .Select(v => v.ReviewStatus.ToString())
                 .FirstOrDefault() == review);
         }
+        if (filter.JiraIssueKey is not null)
+            query = ApplyJiraIssueKeyFilter(query, projectId, filter.JiraIssueKey);
         return query;
+    }
+
+    /// <summary>
+    /// Jira traceability filter (Phase 4 Slice 6): matches test cases where
+    /// ANY version carries Jira provenance with the exact normalized issue
+    /// key. The project predicate stays in SQL on both paths; pagination and
+    /// all other filters are unaffected.
+    /// </summary>
+    private IQueryable<TestCase> ApplyJiraIssueKeyFilter(
+        IQueryable<TestCase> query, Guid projectId, string normalizedKey)
+    {
+        if (_db.Database.IsNpgsql())
+        {
+            // Server-side jsonb containment on PostgreSQL: no version rows
+            // leave the database. Requires BOTH origin == "jira-import" AND
+            // the exact key — the same definition JiraProvenanceReader uses
+            // for detail projection, so list and detail can never disagree.
+            // The fragment is serializer-built (never string-concatenated).
+            var fragment = JsonDocument.Parse(JsonSerializer.Serialize(new
+            {
+                origin = JiraProvenanceReader.JiraImportOrigin,
+                jiraIssueKey = normalizedKey,
+            }));
+            return query.Where(t => _db.TestCaseVersions.Any(v =>
+                v.TestCaseId == t.Id &&
+                v.GenerationRequest != null &&
+                EF.Functions.JsonContains(v.GenerationRequest!, fragment.RootElement)));
+        }
+
+        // Non-relational test provider (InMemory): identical semantics
+        // evaluated over project-scoped rows. Production Npgsql always takes
+        // the SQL path above; this branch exists only so the filter remains
+        // testable without a live database.
+        var matchingIds = _db.TestCaseVersions
+            .Where(v => v.GenerationRequest != null)
+            .Join(_db.TestCases.Where(t => t.ProjectId == projectId),
+                v => v.TestCaseId, t => t.Id, (v, _) => v)
+            .AsEnumerable()
+            .Where(v => JiraProvenanceReader.Matches(v.GenerationRequest, normalizedKey))
+            .Select(v => v.TestCaseId)
+            .ToHashSet();
+        return query.Where(t => matchingIds.Contains(t.Id));
     }
 
     private static bool IsUniqueViolation(DbUpdateException ex)

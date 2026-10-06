@@ -899,3 +899,23 @@ The Jira GET never consumes the AI generation budget. Provenance extends
 unchanged. Audit `jira-story-import.requested/completed/failed` carries
 lengths/counts only — never story text, tokens, or emails. No migration,
 no new packages, no new permissions, no worker/Temporal/grid changes.
+
+## 23. Jira-Test Traceability Surfacing (Phase 4 Slice 6)
+
+Read-side use of Slice-5 stored provenance — no new aggregate, no Jira
+calls, no AI:
+
+```text
+TestCase detail/versions reads → JiraProvenanceReader (defensive projection
+  of stored generation_request → nullable jiraProvenance DTO, malformed → null)
+TestCase list ?jiraIssueKey=PROJ-123 → normalized exact match → test cases
+  where ANY version carries that key (Npgsql jsonb @> containment; project
+  predicate + pagination + filter composition unchanged)
+```
+
+Rules: raw `generation_request` is never returned; only `origin`,
+`jiraIssueKey/Type/BaseUrlHost/FetchedAt` are exposed, `testcases.read`
+gated, project-scoped; reads generate no audit events; malformed history
+never breaks reads. No migration (no GIN index), no new permissions, no
+persisted Story/Requirement, no change detection, no regeneration, no
+sync — all deferred.

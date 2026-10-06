@@ -54,10 +54,11 @@ public static class TestCaseEndpoints
                 string? framework,
                 string? platform,
                 string? reviewStatus,
+                string? jiraIssueKey,
                 ITestCaseService service,
                 CancellationToken ct) =>
             service.ListAsync(projectId, page ?? 1, pageSize ?? 25,
-                new TestCaseFilters(search, status, priority, framework, platform, reviewStatus), ct))
+                new TestCaseFilters(search, status, priority, framework, platform, reviewStatus, jiraIssueKey), ct))
             .WithName("ListTestCases")
             .WithSummary("Paginated, filtered test-case list (no source code).");
 

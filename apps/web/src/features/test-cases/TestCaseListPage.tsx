@@ -189,7 +189,24 @@ export function TestCaseListPage() {
             placeholder="e.g. web"
           />
         </label>
+        <label className="flex min-w-36 flex-1 flex-col gap-1 text-xs font-medium text-slate-500 sm:flex-none">
+          Jira issue key
+          <Input
+            aria-label="Jira issue key filter"
+            value={filters.jiraIssueKey ?? ''}
+            onChange={(e) => setFilter('jiraIssueKey')(e.target.value)}
+            placeholder="PROJ-123"
+            maxLength={30}
+          />
+        </label>
       </form>
+
+      {committed.filters.jiraIssueKey && (
+        <p className="text-sm text-slate-600" aria-label="Active Jira filter">
+          Showing tests from <strong className="font-mono">{committed.filters.jiraIssueKey}</strong> — historical
+          Jira traceability, not a live Jira query.
+        </p>
+      )}
 
       {cases.isLoading && (
         <div className="space-y-2" aria-label="Loading test cases">
@@ -211,9 +228,11 @@ export function TestCaseListPage() {
             </span>
             <h2 className="text-base font-semibold text-slate-900">No test cases found</h2>
             <p className="max-w-md text-sm text-slate-500">
-              {committed.search || Object.keys(committed.filters).length > 0
-                ? 'No test cases match the current search or filters.'
-                : 'This project has no test cases yet. Create the first one to start the repository.'}
+              {committed.filters.jiraIssueKey
+                ? `No tests were generated from ${committed.filters.jiraIssueKey}.`
+                : committed.search || Object.keys(committed.filters).length > 0
+                  ? 'No test cases match the current search or filters.'
+                  : 'This project has no test cases yet. Create the first one to start the repository.'}
             </p>
             {canManage && (
               <Link to={`/projects/${projectId}/test-cases/new`}>

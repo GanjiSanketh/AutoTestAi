@@ -301,13 +301,20 @@ public sealed class TestCaseService : ITestCaseService
             if (Enum.TryParse<ReviewStatus>(filters.ReviewStatus.Trim(), ignoreCase: true, out var r)) review = r.ToString();
             else errors.Add(new FieldError("reviewStatus", "Review status must be 'Pending', 'Approved', 'ChangesRequested' or 'Rejected'."));
         }
+        string? jiraIssueKey = null;
+        if (!string.IsNullOrWhiteSpace(filters.JiraIssueKey))
+        {
+            if (TestGeneration.JiraIssueKey.TryNormalize(filters.JiraIssueKey, out var normalized)) jiraIssueKey = normalized;
+            else errors.Add(new FieldError("jiraIssueKey", "Issue key must look like PROJ-123 (letters, digits, one hyphen) and be at most 30 characters."));
+        }
         ValidationException.ThrowIfInvalid(errors);
         return new TestCaseStatusFilter(
             status,
             priority,
             string.IsNullOrWhiteSpace(filters.Framework) ? null : filters.Framework.Trim(),
             string.IsNullOrWhiteSpace(filters.Platform) ? null : filters.Platform.Trim(),
-            review);
+            review,
+            jiraIssueKey);
     }
 
     private static List<FieldError> ValidateMetadata(
@@ -436,5 +443,6 @@ public sealed class TestCaseService : ITestCaseService
         TestStep.Parse(version.StructuredSteps?.RootElement).Select(s =>
             new TestStepDto(s.Order, s.Action, s.Target, s.Value)).ToList(),
         version.GenerationProvider, version.GenerationModel, version.GenerationLatencyMs,
-        version.ReviewStatus.ToString(), version.CreatedBy, version.CreatedAt);
+        version.ReviewStatus.ToString(), version.CreatedBy, version.CreatedAt,
+        JiraProvenanceReader.TryRead(version.GenerationRequest));
 }

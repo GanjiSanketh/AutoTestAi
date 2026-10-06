@@ -224,4 +224,61 @@ describe('TestCaseDetailsPage', () => {
       ),
     );
   });
+
+  it('shows Jira provenance for the version that has it', async () => {
+    profileWith([Permissions.TestCasesRead]);
+    mockedVersions.mockResolvedValue([
+      { ...versions[0], jiraProvenance: null },
+      {
+        ...versions[1],
+        jiraProvenance: {
+          origin: 'jira-import',
+          jiraIssueKey: 'PROJ-9',
+          jiraIssueType: 'Story',
+          jiraBaseUrlHost: 'company.atlassian.net',
+          jiraFetchedAt: '2026-10-06T00:00:00Z',
+        },
+      },
+    ] as never);
+    renderPage();
+    await waitFor(() => expect(screen.queryByText('Version history')).not.toBeNull());
+    // History marks only the Jira version; the current version shows nothing.
+    expect(screen.queryByText('From PROJ-9')).not.toBeNull();
+    expect(screen.queryByText(/Generated from PROJ-9/)).toBeNull();
+    // Selecting v1 reveals the version-level provenance section.
+    fireEvent.click(screen.getByRole('button', { name: /v1/ }));
+    await waitFor(() => expect(screen.queryByText(/Generated from PROJ-9/)).not.toBeNull());
+    expect(screen.queryByText('Story')).not.toBeNull();
+    expect(screen.queryByText('company.atlassian.net')).not.toBeNull();
+  });
+
+  it('hides Jira provenance when versions have none', async () => {
+    profileWith([Permissions.TestCasesRead]);
+    renderPage();
+    await waitFor(() => expect(screen.queryByText('Version history')).not.toBeNull());
+    expect(screen.queryByText(/Generated from /)).toBeNull();
+    expect(screen.queryByText(/From PROJ-/)).toBeNull();
+  });
+
+  it('never renders raw generation request content', async () => {
+    profileWith([Permissions.TestCasesRead]);
+    mockedVersions.mockResolvedValue([
+      {
+        ...versions[0],
+        jiraProvenance: {
+          origin: 'jira-import',
+          jiraIssueKey: 'PROJ-9',
+          jiraIssueType: null,
+          jiraBaseUrlHost: null,
+          jiraFetchedAt: null,
+        },
+        generationRequest: { acceptanceCriteria: ['SECRET-CRITERION'], storyTitle: 'Raw title' },
+      },
+    ] as never);
+    renderPage();
+    await waitFor(() => expect(screen.queryByText('Version history')).not.toBeNull());
+    expect(screen.queryByText('SECRET-CRITERION')).toBeNull();
+    expect(screen.queryByText('Raw title')).toBeNull();
+    expect(screen.queryByText(/Generated from PROJ-9/)).not.toBeNull();
+  });
 });

@@ -233,8 +233,13 @@ GET    /api/v1/test-cases/{testCaseId}/versions/{versionId}
 POST   /api/v1/test-cases/{testCaseId}/review           → { versionId, reviewStatus }
 ```
 
-List supports `?page=&pageSize=&search=&status=&priority=&framework=&platform=&reviewStatus=`
+List supports `?page=&pageSize=&search=&status=&priority=&framework=&platform=&reviewStatus=&jiraIssueKey=`
 (max page size 100). Search covers key/title/module (case-insensitive).
+`jiraIssueKey` (Phase 4 Slice 6) filters to test cases where ANY version
+carries Jira provenance with the exact normalized key (e.g. `PROJ-123`;
+input is trimmed/uppercased server-side, invalid keys → `400
+VALIDATION_ERROR`); matching is database-side with the existing project
+predicate, pagination, sorting, and filter composition preserved.
 
 Rules: `testcases.read` gates reads, `testcases.manage` gates writes; every
 test-case route resolves test case → project and requires membership (admin
@@ -249,7 +254,12 @@ there is no version-content update endpoint. `structured_steps` stays
 structured JSONB (`[{order, action, target?, value?}]`, ≤500 steps).
 Review lifecycle: Pending ↔ ChangesRequested ↔ Approved/Rejected with
 `Approved → Pending` and `Rejected → Approved` rejected; same-state is a
-no-op. `DELETE` archives instead of physically deleting so executions stay
+no-op. Version reads (`versions`, `versions/{versionId}`) expose an additive
+nullable `jiraProvenance` object (`origin`, `jiraIssueKey`, `jiraIssueType`,
+`jiraBaseUrlHost`, `jiraFetchedAt`; null for non-Jira versions) shaped
+server-side from stored historical provenance — the raw
+`generation_request` JSON is never returned. Traceability reads never call
+Jira and generate no audit events. `DELETE` archives instead of physically deleting so executions stay
 reproducible via `test_case_version_id`. Duplicate key → `409`; validation
 failures → `400` with field details. Test-case operations emit `audit_events`
 (`testcase.created/updated/archived`, `testcase.version_created`,

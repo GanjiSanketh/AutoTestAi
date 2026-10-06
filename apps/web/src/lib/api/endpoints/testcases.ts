@@ -29,6 +29,14 @@ export interface TestStep {
   value: string | null;
 }
 
+export interface JiraProvenance {
+  origin: string;
+  jiraIssueKey: string;
+  jiraIssueType: string | null;
+  jiraBaseUrlHost: string | null;
+  jiraFetchedAt: string | null;
+}
+
 export interface TestCaseVersion {
   id: string;
   testCaseId: string;
@@ -41,6 +49,8 @@ export interface TestCaseVersion {
   reviewStatus: string;
   createdBy: string | null;
   createdAt: string;
+  /** Safe Jira origin shaped server-side; absent/null for non-Jira versions. */
+  jiraProvenance?: JiraProvenance | null;
 }
 
 export interface TestCaseDetails {
@@ -69,6 +79,7 @@ export interface TestCaseFilters {
   framework?: string;
   platform?: string;
   reviewStatus?: string;
+  jiraIssueKey?: string;
 }
 
 export interface CreateTestCaseInput {

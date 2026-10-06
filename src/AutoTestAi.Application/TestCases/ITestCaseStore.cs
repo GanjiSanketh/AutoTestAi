@@ -39,10 +39,14 @@ public interface ITestCaseStore
     Task AddVersionAsync(TestCaseVersion version, CancellationToken ct);
 }
 
-/// <summary>Validated list-filter values (null = no filter).</summary>
+/// <summary>
+/// Validated list-filter values (null = no filter). JiraIssueKey carries the
+/// server-normalized exact issue key (e.g. PROJ-123); matching is ANY-version.
+/// </summary>
 public sealed record TestCaseStatusFilter(
     string? Status,
     string? Priority,
     string? Framework,
     string? Platform,
-    string? ReviewStatus);
+    string? ReviewStatus,
+    string? JiraIssueKey = null);

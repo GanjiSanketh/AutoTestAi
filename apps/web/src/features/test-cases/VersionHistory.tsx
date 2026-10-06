@@ -59,6 +59,9 @@ export function VersionHistory({
                     <Badge tone="brand">Current</Badge>
                   )}
                   <Badge tone={reviewTone(version.reviewStatus)}>{version.reviewStatus}</Badge>
+                  {version.jiraProvenance && (
+                    <Badge tone="neutral">From {version.jiraProvenance.jiraIssueKey}</Badge>
+                  )}
                 </span>
                 <span className="block truncate text-xs text-slate-500">
                   {new Date(version.createdAt).toLocaleString()}
