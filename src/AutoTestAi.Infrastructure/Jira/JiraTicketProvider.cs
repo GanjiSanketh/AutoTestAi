@@ -19,15 +19,19 @@ public sealed class JiraOptions
 }
 
 /// <summary>
-/// Infrastructure Jira HTTP adapter (Slice 7 §3/§22). Owns transport, Basic
-/// auth, request/response DTOs, and status interpretation. Application code
-/// never sees Jira JSON shapes. Credentials are attached per-request and never
-/// logged, returned, or stored in ticket rows.
+/// Infrastructure Jira HTTP adapter (Slice 7 §3/§22, extended Phase 4
+/// Slice 5 §3). Owns transport, Basic auth, request/response DTOs, and
+/// status interpretation. Application code never sees Jira JSON shapes.
+/// Credentials are attached per-request and never logged, returned, or
+/// stored in ticket rows.
 /// </summary>
 public sealed class JiraTicketProvider : IJiraTicketProvider
 {
     public const string HttpClientName = "jira";
     private const int MaxResponseChars = 200_000;
+
+    /// <summary>Narrow fields projection for single-issue story-import reads.</summary>
+    private const string IssueReadFields = "summary,description,issuetype,project";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IHttpClientFactory _httpClients;
@@ -141,6 +145,126 @@ public sealed class JiraTicketProvider : IJiraTicketProvider
         {
             throw new JiraProviderException(JiraErrorKind.MalformedResponse,
                 "Jira returned a malformed creation response.", ex);
+        }
+    }
+
+    /// <summary>
+    /// Transient single-issue read (Phase 4 Slice 5 §3). GETs one issue by
+    /// key with a narrow fields projection (summary, description, issuetype,
+    /// project). Single attempt from the caller perspective; existing
+    /// timeout/bounded-read/status semantics are reused. Never searches,
+    /// never bulk-fetches, never requests comments, attachments, links,
+    /// custom fields, or rendered HTML.
+    /// </summary>
+    public async Task<JiraIssueDto> GetIssueAsync(
+        JiraIssueRequest request,
+        string email,
+        string apiToken,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(apiToken))
+            throw JiraProviderException.Authentication("Jira credentials are not configured.");
+        if (!JiraUrlValidator.IsValidBaseUrl(request.BaseUrl, out _))
+            throw JiraProviderException.Validation("The Jira base URL is invalid.");
+        var issueKey = request.IssueKey?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(issueKey))
+            throw JiraProviderException.Validation("A Jira issue key is required.");
+
+        var settings = _options.Value;
+        var baseUrl = request.BaseUrl.Trim().TrimEnd('/');
+        var endpoint =
+            $"{baseUrl}/rest/api/3/issue/{Uri.EscapeDataString(issueKey)}" +
+            $"?fields={IssueReadFields}";
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(settings.TimeoutSeconds, 5, 120)));
+
+        string responseBody;
+        HttpStatusCode status;
+        try
+        {
+            var client = _httpClients.CreateClient(HttpClientName);
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Get, endpoint);
+            // Basic auth (email:token) attached server-side; never logged.
+            var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{email.Trim()}:{apiToken.Trim()}"));
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+            using var response = await client.SendAsync(httpRequest, HttpCompletionOption.ResponseContentRead, timeout.Token);
+            status = response.StatusCode;
+            responseBody = await ReadBoundedAsync(response, Math.Max(1, settings.MaxErrorBodyChars), timeout.Token);
+            MapStatus(status, response);
+        }
+        catch (JiraProviderException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning("Jira issue read timed out for issue {IssueKey}.", issueKey);
+            throw JiraProviderException.Timeout("Jira did not respond in time. Please try again later.", ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Jira is unreachable at the configured base URL.");
+            throw JiraProviderException.Unavailable("Jira is currently unavailable. Please try again later.", ex);
+        }
+
+        // Log outcome only — never request/response bodies that could carry secrets.
+        _logger.LogInformation("Jira responded HTTP {Status} to issue read for issue {IssueKey}.",
+            (int)status, issueKey);
+
+        return ParseIssueResponse(responseBody, issueKey);
+    }
+
+    private static JiraIssueDto ParseIssueResponse(string responseBody, string requestedKey)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(responseBody);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                throw new JiraProviderException(JiraErrorKind.MalformedResponse,
+                    "Jira returned an unusable issue response.");
+            var key = root.TryGetProperty("key", out var keyEl) && keyEl.ValueKind == JsonValueKind.String
+                ? keyEl.GetString() : null;
+            if (!root.TryGetProperty("fields", out var fields) || fields.ValueKind != JsonValueKind.Object)
+                throw new JiraProviderException(JiraErrorKind.MalformedResponse,
+                    "Jira returned an unusable issue response.");
+            var summary = fields.TryGetProperty("summary", out var summaryEl) &&
+                summaryEl.ValueKind == JsonValueKind.String ? summaryEl.GetString() : null;
+            string? issueType = null;
+            if (fields.TryGetProperty("issuetype", out var typeEl) && typeEl.ValueKind == JsonValueKind.Object &&
+                typeEl.TryGetProperty("name", out var nameEl) && nameEl.ValueKind == JsonValueKind.String)
+                issueType = nameEl.GetString();
+            string? projectKey = null;
+            if (fields.TryGetProperty("project", out var projectEl) && projectEl.ValueKind == JsonValueKind.Object &&
+                projectEl.TryGetProperty("key", out var projectKeyEl) && projectKeyEl.ValueKind == JsonValueKind.String)
+                projectKey = projectKeyEl.GetString();
+            string? descriptionAdfJson = null;
+            if (fields.TryGetProperty("description", out var descriptionEl) &&
+                descriptionEl.ValueKind != JsonValueKind.Null &&
+                descriptionEl.ValueKind != JsonValueKind.Undefined)
+            {
+                if (descriptionEl.ValueKind != JsonValueKind.Object)
+                    throw new JiraProviderException(JiraErrorKind.MalformedResponse,
+                        "Jira returned an unusable issue response.");
+                descriptionAdfJson = descriptionEl.GetRawText();
+            }
+            if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(summary) ||
+                string.IsNullOrWhiteSpace(issueType) || string.IsNullOrWhiteSpace(projectKey))
+                throw new JiraProviderException(JiraErrorKind.MalformedResponse,
+                    "Jira returned an unusable issue response.");
+            return new JiraIssueDto(
+                key!.Trim(),
+                summary!.Trim(),
+                descriptionAdfJson,
+                issueType!.Trim(),
+                projectKey!.Trim());
+        }
+        catch (JsonException ex)
+        {
+            throw new JiraProviderException(JiraErrorKind.MalformedResponse,
+                "Jira returned an unusable issue response.", ex);
         }
     }
 

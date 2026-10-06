@@ -74,6 +74,8 @@ public static class DependencyInjection
         services.AddScoped<ExecutionGrid.IMobileSlotLeaseService, ExecutionGrid.MobileSlotLeaseService>();
         services.AddScoped<IAiTestGenerator, TestGenerationService>();
         services.AddScoped<IAiStoryTestGenerator, StoryTestGenerationService>();
+        services.AddSingleton<JiraStoryImportRateLimiter>();
+        services.AddScoped<IJiraStoryImportService, JiraStoryImportService>();
         services.AddScoped<IAuditService, AuditService>();
         return services;
     }

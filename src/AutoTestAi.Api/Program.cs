@@ -228,6 +228,7 @@ app.MapProjectEndpoints();
 app.MapTestCaseEndpoints();
 app.MapTestGenerationEndpoints();
 app.MapStoryTestGenerationEndpoints();
+app.MapJiraStoryImportEndpoints();
 app.MapExecutionEndpoints();
 app.MapVariableSetEndpoints();
 app.MapSecretEndpoints();

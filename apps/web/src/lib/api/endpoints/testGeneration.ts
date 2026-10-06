@@ -65,6 +65,17 @@ export interface StoryTestGenerationInput {
   maxProposals?: number;
 }
 
+export interface StoryTestGenerationFromJiraInput {
+  issueKey: string;
+  framework: string;
+  platform: string;
+  targetUrl?: string;
+  module?: string;
+  priority?: string;
+  additionalContext?: string;
+  maxProposals?: number;
+}
+
 export interface StoryTestProposal {
   proposalId: string;
   index: number;
@@ -113,4 +124,6 @@ export const testGenerationEndpoints = {
     api.get<AiProviderStatus>(`/api/v1/projects/${projectId}/ai-provider-status`),
   generateFromStory: (projectId: string, input: StoryTestGenerationInput) =>
     api.post<StoryTestGenerationResult>(`/api/v1/projects/${projectId}/story-test-generation`, input),
+  generateFromJira: (projectId: string, input: StoryTestGenerationFromJiraInput) =>
+    api.post<StoryTestGenerationResult>(`/api/v1/projects/${projectId}/story-test-generation-from-jira`, input),
 };

@@ -859,6 +859,43 @@ requests delegate to the dedicated `story-to-tests-v1` contract only when
 story context is present); proposals are previews, never persisted by the
 generation endpoint; saved tests are indistinguishable from other
 AI-generated `Pending` tests; human approval remains the sole path to
-`Approved`; no Jira import, no persisted story entity, no story-test
+`Approved`; no persisted story entity, no story-test
 links, no suite attachment, no autonomous mutation — all deferred.
+(Jira import is implemented separately as Slice 5 §22; this section
+records the Slice-3 manual-input boundary.)
 No migration, no new dependencies, no new permissions.
+
+## 22. Jira Story Import — Transient Input Adapter (Phase 4 Slice 5)
+
+Single Jira issue key (e.g. `PROJ-123`) → server-side Jira GET through the
+project's existing Jira integration → bounded ADF normalization → existing
+story-to-test generation (`story-to-tests-v1`) → transient draft proposals
+→ explicit user save → `Pending` v1 → existing review/approval gate:
+
+```text
+React StoryTestGeneratorPage "Import from Jira" card (testcases.manage UX gate)
+  → POST .../story-test-generation-from-jira {issueKey + story overrides}
+  → JiraStoryImportService (auth testcases.manage + membership, override
+     validation, separate 30/min Jira-read guard, integration resolution)
+  → IJiraTicketProvider.GetIssueAsync (Infrastructure GET
+     /rest/api/3/issue/{key}?fields=summary,description,issuetype,project,
+     existing Basic auth/timeout/bounds/status mapping, single attempt)
+  → same-project check (fetched Jira project key == configured project key,
+     else opaque 404) → JiraStoryNormalizer (pure ADF allowlist flatten +
+     criteria extraction, redacted, bounded) → GenerateStoryTestsCommand
+     (+ additive JiraImport provenance) → IAiStoryTestGenerator (unchanged
+     prompt/budget/validator/redactor/audit) → transient proposals
+  → user selects proposals → POST .../test-cases (existing path) → Pending
+```
+
+Rules: transient adapter only — no persisted Story/Requirement entity, no
+story table, no story/test join, no JQL/search/bulk import, no comments or
+attachments, no custom fields, no bidirectional sync, no autonomous
+mutation, no execution change. Prompt stays `story-to-tests-v1` (Jira text
+is untrusted data inside the existing story context, never instructions).
+The Jira GET never consumes the AI generation budget. Provenance extends
+`test_case_versions.generation_request` additively (`origin=jira-import`,
+`jiraIssueKey/Type/BaseUrlHost/FetchedAt`); non-Jira provenance bytes are
+unchanged. Audit `jira-story-import.requested/completed/failed` carries
+lengths/counts only — never story text, tokens, or emails. No migration,
+no new packages, no new permissions, no worker/Temporal/grid changes.

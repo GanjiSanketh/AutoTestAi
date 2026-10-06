@@ -18,6 +18,7 @@ vi.mock('../../lib/api/endpoints/testGeneration', () => ({
     generate: vi.fn(),
     status: vi.fn(),
     generateFromStory: vi.fn(),
+    generateFromJira: vi.fn(),
   },
 }));
 
@@ -31,6 +32,7 @@ vi.mock('../../lib/auth/useProfile', () => ({
 }));
 
 const mockedStoryGenerate = vi.mocked(testGenerationEndpoints.generateFromStory);
+const mockedJiraGenerate = vi.mocked(testGenerationEndpoints.generateFromJira);
 const mockedStatus = vi.mocked(testGenerationEndpoints.status);
 const mockedCreate = vi.mocked(testcasesEndpoints.create);
 const mockedProfile = vi.mocked(useProfile);
@@ -283,5 +285,82 @@ describe('StoryTestGeneratorPage', () => {
     fillValidStory();
     fireEvent.click(screen.getByRole('button', { name: /generate proposals/i }));
     expect(await screen.findByText('Generation rate limited')).toBeTruthy();
+  });
+
+  it('renders the Jira import card', () => {
+    renderPage();
+    expect(screen.getByLabelText('Jira issue key')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /generate from jira/i })).toBeTruthy();
+  });
+
+  it('blocks invalid Jira keys client-side', async () => {
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Jira issue key'), { target: { value: 'not-a-key!!' } });
+    fireEvent.click(screen.getByRole('button', { name: /generate from jira/i }));
+    expect(await screen.findByText(/Enter a Jira issue key like PROJ-123/)).toBeTruthy();
+    expect(mockedJiraGenerate).not.toHaveBeenCalled();
+  });
+
+  it('submits valid Jira keys with form overrides and shows origin', async () => {
+    mockedJiraGenerate.mockResolvedValue(
+      storyResult([successProposal({ provenance: { source: 'story-ai', origin: 'jira-import', jiraIssueKey: 'PROJ-123' } })]),
+    );
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Jira issue key'), { target: { value: 'proj-123' } });
+    fireEvent.click(screen.getByRole('button', { name: /generate from jira/i }));
+    await waitFor(() =>
+      expect(mockedJiraGenerate).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({ issueKey: 'proj-123', framework: 'playwright', platform: 'web' }),
+      ),
+    );
+    expect(await screen.findByText('Guest checkout happy path')).toBeTruthy();
+    expect(screen.getByText('From PROJ-123')).toBeTruthy();
+    // Manual generation stays untouched by the Jira path.
+    expect(mockedStoryGenerate).not.toHaveBeenCalled();
+  });
+
+  it('shows a loading state while importing from Jira', async () => {
+    mockedJiraGenerate.mockReturnValue(new Promise(() => {}));
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Jira issue key'), { target: { value: 'PROJ-123' } });
+    fireEvent.click(screen.getByRole('button', { name: /generate from jira/i }));
+    expect(await screen.findByLabelText('Story generation in progress')).toBeTruthy();
+  });
+
+  it('maps Jira server errors to user-safe panels', async () => {
+    mockedJiraGenerate.mockRejectedValue(new ApiError(502, 'JIRA_AUTH_FAILED', 'Bad credentials.'));
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Jira issue key'), { target: { value: 'PROJ-123' } });
+    fireEvent.click(screen.getByRole('button', { name: /generate from jira/i }));
+    expect(await screen.findByText('Jira rejected the request')).toBeTruthy();
+  });
+
+  it('blocks Jira import without testcases.manage', async () => {
+    profileWith([Permissions.TestCasesRead]);
+    renderPage();
+    expect(screen.getByRole('button', { name: /generate from jira/i }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('saves Jira-imported proposals through the existing save flow', async () => {
+    mockedJiraGenerate.mockResolvedValue(
+      storyResult([successProposal({ provenance: { source: 'story-ai', origin: 'jira-import', jiraIssueKey: 'PROJ-9' } })]),
+    );
+    mockedCreate.mockResolvedValue({ id: 'case-9', testKey: 'AI-JIRA-9' } as never);
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Jira issue key'), { target: { value: 'PROJ-9' } });
+    fireEvent.click(screen.getByRole('button', { name: /generate from jira/i }));
+    await screen.findByText('Guest checkout happy path');
+    fireEvent.click(screen.getByRole('button', { name: /save selected \(1\)/i }));
+    await waitFor(() =>
+      expect(mockedCreate).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({
+          title: 'Guest checkout happy path',
+          sourceType: 'ai',
+          generationRequest: { source: 'story-ai', origin: 'jira-import', jiraIssueKey: 'PROJ-9' },
+        }),
+      ),
+    );
   });
 });

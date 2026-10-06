@@ -233,18 +233,30 @@ public sealed class StoryTestGenerationService : IAiStoryTestGenerator
         // Redact user-controlled strings BEFORE serialization (mirrors the
         // generic generation provenance path).
         static string R(string? value) => SensitiveDataRedactor.Redact(value ?? string.Empty);
-        var payload = JsonSerializer.Serialize(new
+        // Phase 4 Slice 5: Jira import origin is additive. The base shape is
+        // built first so that when Jira context is absent the serialized
+        // bytes are unchanged from Slice 3; Jira fields append after.
+        var payload = new Dictionary<string, object?>
         {
-            storyTitle = R(normalized.StoryTitle),
-            storyDescription = R(normalized.StoryDescription),
-            acceptanceCriteria = normalized.AcceptanceCriteria.Select(R).ToList(),
-            focusCriterionIndex = focusIndex,
-            promptVersion = AiPromptVersions.StoryToTestsV1,
-            source = "story-ai",
-            generationId = generationId.ToString(),
-            proposalId,
-        });
-        return JsonDocument.Parse(SensitiveDataRedactor.Redact(payload));
+            ["storyTitle"] = R(normalized.StoryTitle),
+            ["storyDescription"] = R(normalized.StoryDescription),
+            ["acceptanceCriteria"] = normalized.AcceptanceCriteria.Select(R).ToList(),
+            ["focusCriterionIndex"] = focusIndex,
+            ["promptVersion"] = AiPromptVersions.StoryToTestsV1,
+            ["source"] = "story-ai",
+        };
+        var jira = normalized.JiraImport;
+        if (jira is not null)
+        {
+            payload["origin"] = "jira-import";
+            payload["jiraIssueKey"] = R(jira.IssueKey);
+            payload["jiraIssueType"] = R(jira.IssueType);
+            payload["jiraBaseUrlHost"] = R(jira.BaseUrlHost);
+            payload["jiraFetchedAt"] = R(jira.FetchedAt);
+        }
+        payload["generationId"] = generationId.ToString();
+        payload["proposalId"] = proposalId;
+        return JsonDocument.Parse(SensitiveDataRedactor.Redact(JsonSerializer.Serialize(payload)));
     }
 
     private static string SafeAuditJson(

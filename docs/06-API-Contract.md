@@ -396,6 +396,69 @@ LatencyMs/Request`); saved tests start `Pending` (never auto-approved).
 Audit events `story-generation.requested/completed/failed` carry counts and
 versions only — never story text. No migration, no Jira, no story entity.
 
+### 7.2 Story Test Generation from Jira (Phase 4 Slice 5, transient import)
+
+```http
+POST /api/v1/projects/{projectId}/story-test-generation-from-jira
+```
+
+Example request (issue key plus the §7.1 override fields — never a Jira URL,
+project key, integration id, or credentials):
+
+```json
+{
+  "issueKey": "PROJ-123",
+  "framework": "playwright",
+  "platform": "web",
+  "module": "Checkout",
+  "priority": "High",
+  "maxProposals": 2
+}
+```
+
+Response: the §7.1 proposal shape (`→ 200`, `promptVersion` stays
+`story-to-tests-v1`); each successful proposal provenance additionally
+carries safe Jira metadata:
+
+```json
+{
+  "source": "story-ai",
+  "origin": "jira-import",
+  "jiraIssueKey": "PROJ-123",
+  "jiraIssueType": "Story",
+  "jiraBaseUrlHost": "company.atlassian.net",
+  "jiraFetchedAt": "2026-10-06T00:00:00Z"
+}
+```
+
+Rules: `testcases.manage` + project membership (admin bypass); anonymous →
+`401`, unauthorized → `403`. `issueKey` is trimmed, uppercased,
+`^[A-Z][A-Z0-9]+-[0-9]+$`, ≤30 chars (otherwise `400`); overrides reuse
+§7.1 bounds (`maxProposals` 1–10). The server resolves the project's own
+active Jira integration, GETs one issue (`fields =
+summary,description,issuetype,project`, single attempt, existing
+auth/timeout/bounds/`Retry-After` handling), and requires the fetched Jira
+project key to equal the configured one (mismatch → opaque `404`). Only
+the summary, ADF description (allowlisted nodes: `doc`, `paragraph`,
+`heading`, `bulletList`, `orderedList`, `listItem`, `text`, `hardBreak`;
+marks ignored; media/cards/code/tables/mentions and unknown nodes dropped;
+bounded nodes/depth/size), and issue-type name are used — comments,
+attachments, links, custom fields, and rendered HTML are never requested
+or imported. Criteria come from description list items (≤50 × ≤2000,
+fallback to the description as one criterion); title ≤200, description
+≤4000 (explicit `… [truncated]` marker), all redacted. Empty/unusable Jira
+content → `400`; Jira `404` → `404` opaque; Jira `401/403` →
+`502` (`JIRA_AUTH_FAILED`/`JIRA_FORBIDDEN`); Jira `429` → `429`; Jira
+`5xx`/timeout/malformed → `502/503` safe codes. Missing/disabled Jira
+integration → `409`. The Jira GET has its own 30/min/project process-local
+guard and never consumes the AI generation budget; generation reuses the
+§7.1 pipeline unchanged (same prompt, budget, validator, per-proposal
+semantics). Nothing is persisted by the import; saving reuses
+`POST …/test-cases` (`sourceType = "ai"`, `Pending`, existing review
+gate). Audit `jira-story-import.requested/completed/failed` carries
+counts/lengths only. No migration, no persisted story, no JQL/bulk import,
+no bidirectional sync.
+
 ## 8. Execution
 
 Implemented in Phase 1 Slice 5. Executions bind exactly one immutable

@@ -18,7 +18,7 @@ public sealed record JiraCreateResult(
     string ExternalKey,
     string ExternalUrl);
 
-/// <summary>Application-facing Jira boundary (Slice 7 §8).</summary>
+/// <summary>Application-facing Jira boundary (Slice 7 §8, extended Slice 5 §3).</summary>
 public interface IJiraTicketProvider
 {
     Task<JiraCreateResult> CreateIssueAsync(
@@ -26,7 +26,43 @@ public interface IJiraTicketProvider
         string Email,
         string ApiToken,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Transient single-issue read for story import (Phase 4 Slice 5).
+    /// Fetches one issue by key with a narrow fields projection; never
+    /// searches, never bulk-fetches. Infrastructure owns HTTP/DTOs.
+    /// </summary>
+    Task<JiraIssueDto> GetIssueAsync(
+        JiraIssueRequest request,
+        string Email,
+        string ApiToken,
+        CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Provider-neutral Jira single-issue read request (Phase 4 Slice 5).
+/// The Jira server comes from the project integration configuration —
+/// never from caller-supplied URLs.
+/// </summary>
+public sealed record JiraIssueRequest(
+    string BaseUrl,
+    string IssueKey);
+
+/// <summary>
+/// Minimal normalized Jira issue (Phase 4 Slice 5 §6). Only the fields the
+/// story-import slice needs; comments, attachments, links, custom fields,
+/// and all other metadata are never projected here.
+/// DescriptionAdfJson is the raw Atlassian Document Format subtree for the
+/// description field only (null when absent), serialized as JSON text for
+/// the Application-level ADF normalizer. The Jira issue envelope itself
+/// never crosses this boundary.
+/// </summary>
+public sealed record JiraIssueDto(
+    string IssueKey,
+    string Summary,
+    string? DescriptionAdfJson,
+    string IssueTypeName,
+    string ProjectKey);
 
 /// <summary>Machine-readable Jira failure kinds for error mapping.</summary>
 public enum JiraErrorKind

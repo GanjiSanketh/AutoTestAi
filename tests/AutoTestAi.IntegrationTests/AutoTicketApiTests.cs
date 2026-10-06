@@ -34,6 +34,9 @@ public sealed class AutoTicketApiTests : IClassFixture<AutoTicketApiTests.AutoTi
             if (Handler is not null) return Handler(request);
             return Task.FromResult(new JiraCreateResult("10001", "ABC-123", "https://jira.test/browse/ABC-123"));
         }
+
+        public Task<JiraIssueDto> GetIssueAsync(JiraIssueRequest request, string email, string apiToken, CancellationToken ct)
+            => throw new NotImplementedException("Auto-ticket tests never read Jira issues.");
     }
 
     public sealed class AutoTicketFactory : Slice1ApiFactory

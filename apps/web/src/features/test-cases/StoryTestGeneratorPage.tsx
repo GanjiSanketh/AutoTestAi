@@ -29,6 +29,21 @@ import { Permissions, hasPermission } from '../../lib/auth/permissions';
 
 const PRIORITIES = ['', 'Critical', 'High', 'Medium', 'Low'];
 const MAX_PROPOSALS_LIMIT = 10;
+const JIRA_KEY_HINT = /^[A-Za-z][A-Za-z0-9]+-\d+$/;
+
+/**
+ * Reads the Jira issue key back from transient proposal provenance, if the
+ * current result came from a Jira import. Provenance is server-built safe
+ * metadata — rendered as inert text only, never as a live Jira link.
+ */
+export function jiraOriginOf(result: StoryTestGenerationResult | null): string | null {
+  if (!result) return null;
+  for (const proposal of result.proposals) {
+    const key = proposal.provenance?.['jiraIssueKey'];
+    if (typeof key === 'string' && key.trim().length > 0) return key.trim();
+  }
+  return null;
+}
 
 type StoryPhase = 'idle' | 'generating' | 'success';
 type SaveState =
@@ -81,12 +96,32 @@ function ErrorPanel({ error, onRetry }: { error: ApiError; onRetry?: () => void 
                   title: 'AI provider not supported',
                   message: error.message,
                 }
-              : code === 'VALIDATION_ERROR'
-                ? { title: 'Story input invalid', message: error.message }
-                : {
-                    title: 'Story generation failed',
-                    message: error.message,
-                  };
+                : code === 'VALIDATION_ERROR'
+                  ? { title: 'Story input invalid', message: error.message }
+                  : code === 'JIRA_AUTH_FAILED' || code === 'JIRA_FORBIDDEN'
+                    ? {
+                        title: 'Jira rejected the request',
+                        message: `${error.message} Check the project Jira integration secret and permissions.`,
+                      }
+                    : code === 'JIRA_UNAVAILABLE'
+                      ? {
+                          title: 'Jira unavailable',
+                          message: `${error.message} Nothing was saved.`,
+                        }
+                      : code === 'NOT_FOUND'
+                        ? {
+                            title: 'Jira issue not found',
+                            message: 'The issue key was not found in this project’s Jira project. Nothing was saved.',
+                          }
+                        : code === 'CONFLICT'
+                          ? {
+                              title: 'Jira integration not ready',
+                              message: error.message,
+                            }
+                          : {
+                              title: 'Story generation failed',
+                              message: error.message,
+                            };
 
   return (
     <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -187,6 +222,8 @@ export function StoryTestGeneratorPage() {
   const [priority, setPriority] = useState('');
   const [additionalContext, setAdditionalContext] = useState('');
   const [maxProposals, setMaxProposals] = useState('10');
+  const [issueKey, setIssueKey] = useState('');
+  const [jiraClientError, setJiraClientError] = useState<string | undefined>(undefined);
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
   const [result, setResult] = useState<StoryTestGenerationResult | null>(null);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -225,8 +262,59 @@ export function StoryTestGeneratorPage() {
     },
   });
 
-  const phase: StoryPhase = generate.isPending ? 'generating' : result ? 'success' : 'idle';
-  const serverError = generate.error instanceof ApiError ? generate.error : null;
+  const generateFromJira = useMutation({
+    mutationFn: () =>
+      testGenerationEndpoints.generateFromJira(projectId, {
+        issueKey: issueKey.trim(),
+        framework: framework.trim(),
+        platform: platform.trim(),
+        targetUrl: targetUrl.trim() || undefined,
+        module: moduleName.trim() || undefined,
+        priority: priority || undefined,
+        additionalContext: additionalContext.trim() || undefined,
+        maxProposals: Number.parseInt(maxProposals, 10),
+      }),
+    onSuccess: (data) => {
+      setResult(data);
+      setSelected(Object.fromEntries(data.proposals.filter((p) => p.status === 'Succeeded').map((p) => [p.proposalId, true])));
+      setSaves({});
+    },
+  });
+
+  const phase: StoryPhase = generate.isPending || generateFromJira.isPending ? 'generating' : result ? 'success' : 'idle';
+  const serverError =
+    generate.error instanceof ApiError
+      ? generate.error
+      : generateFromJira.error instanceof ApiError
+        ? generateFromJira.error
+        : null;
+  const jiraOrigin = jiraOriginOf(result);
+
+  const handleJiraSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = issueKey.trim();
+    if (!JIRA_KEY_HINT.test(trimmed) || trimmed.length > 30) {
+      setJiraClientError('Enter a Jira issue key like PROJ-123 (at most 30 characters).');
+      return;
+    }
+    const parsedMax = Number.parseInt(maxProposals, 10);
+    if (!Number.isInteger(parsedMax) || parsedMax < 1 || parsedMax > MAX_PROPOSALS_LIMIT) {
+      setJiraClientError(
+        `Max proposals must be an integer between 1 and ${MAX_PROPOSALS_LIMIT}. Adjust it in the story form below.`,
+      );
+      return;
+    }
+    if (!framework.trim() || !platform.trim()) {
+      setJiraClientError('Framework and platform are required. Set them in the story form below.');
+      return;
+    }
+    setJiraClientError(undefined);
+    setResult(null);
+    setSelected({});
+    setSaves({});
+    generate.reset();
+    generateFromJira.mutate();
+  };
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -263,7 +351,9 @@ export function StoryTestGeneratorPage() {
     setResult(null);
     setSelected({});
     setSaves({});
+    setJiraClientError(undefined);
     generate.reset();
+    generateFromJira.reset();
   };
 
   const saveOne = async (proposal: StoryTestProposal) => {
@@ -388,6 +478,54 @@ export function StoryTestGeneratorPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle>Import from Jira</CardTitle>
+          <CardDescription>
+            Fetch one issue server-side through this project’s Jira integration and generate
+            proposals from it. Only the issue summary, description, and issue type are used —
+            comments, attachments, links, and custom fields are ignored. Uses the framework,
+            platform, and other options from the story form below.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleJiraSubmit} className="space-y-3" noValidate>
+            <Field
+              label="Jira issue key"
+              error={jiraClientError}
+              hint="Format PROJ-123. Fetch happens server-side; the browser never contacts Jira."
+            >
+              <Input
+                aria-label="Jira issue key"
+                value={issueKey}
+                onChange={(e) => setIssueKey(e.target.value)}
+                placeholder="PROJ-123"
+                maxLength={30}
+              />
+            </Field>
+            <div>
+              <Button
+                type="submit"
+                variant="ai"
+                disabled={generateFromJira.isPending || generate.isPending || !canManage}
+              >
+                {generateFromJira.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    Importing…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" aria-hidden />
+                    Generate from Jira
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>User story input</CardTitle>
           <CardDescription>
             Describe intent, not implementation. Use placeholders like {'{{username}}'} instead of real credentials.
@@ -489,7 +627,7 @@ export function StoryTestGeneratorPage() {
               </Field>
             </div>
             <div>
-              <Button type="submit" variant="ai" disabled={generate.isPending || !canManage}>
+              <Button type="submit" variant="ai" disabled={generate.isPending || generateFromJira.isPending || !canManage}>
                 {generate.isPending ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -521,7 +659,13 @@ export function StoryTestGeneratorPage() {
       )}
 
       {serverError && (
-        <ErrorPanel error={serverError} onRetry={() => generate.mutate()} />
+        <ErrorPanel
+          error={serverError}
+          onRetry={() => {
+            if (generateFromJira.error) generateFromJira.mutate();
+            else generate.mutate();
+          }}
+        />
       )}
 
       {phase === 'success' && result && (
@@ -532,6 +676,7 @@ export function StoryTestGeneratorPage() {
                 <Sparkles className="h-4 w-4 text-purple-600" aria-hidden />
                 Generated proposals
                 <Badge tone="ai">AI-generated previews</Badge>
+                {jiraOrigin && <Badge tone="neutral">From {jiraOrigin}</Badge>}
               </CardTitle>
               <CardDescription>
                 {result.successCount} of {result.proposalCount} proposals succeeded

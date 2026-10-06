@@ -6,7 +6,9 @@ namespace AutoTestAi.Application.TestGeneration;
 /// Manual user-story to test proposals input (Phase 4 Slice 3).
 /// Proposals are returned for user selection and are NOT persisted here;
 /// saving reuses the existing TestCase creation path. No story entity,
-/// no Jira import, no suite attachment.
+/// no suite attachment. Phase 4 Slice 5 adds an optional Jira import
+/// origin: when set, redacted Jira provenance is included additively;
+/// when absent, provenance is byte/behavior compatible with Slice 3.
 /// </summary>
 public sealed record GenerateStoryTestsCommand(
     Guid ProjectId,
@@ -19,7 +21,8 @@ public sealed record GenerateStoryTestsCommand(
     string? Module = null,
     string? Priority = null,
     string? AdditionalContext = null,
-    int MaxProposals = 10);
+    int MaxProposals = 10,
+    JiraImportMetadata? JiraImport = null);
 
 /// <summary>
 /// One story-generated test proposal (Phase 4 Slice 3). Successful proposals
