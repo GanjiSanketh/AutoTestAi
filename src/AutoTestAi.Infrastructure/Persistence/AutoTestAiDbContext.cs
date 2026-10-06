@@ -41,6 +41,7 @@ public sealed class AutoTestAiDbContext : DbContext
     public DbSet<AutoTicketPolicy> AutoTicketPolicies => Set<AutoTicketPolicy>();
     public DbSet<SelfHealingPolicy> SelfHealingPolicies => Set<SelfHealingPolicy>();
     public DbSet<SelfHealingAttempt> SelfHealingAttempts => Set<SelfHealingAttempt>();
+    public DbSet<MaintenanceProposal> MaintenanceProposals => Set<MaintenanceProposal>();
     public DbSet<VisualBaseline> VisualBaselines => Set<VisualBaseline>();
     public DbSet<VariableSet> VariableSets => Set<VariableSet>();
     public DbSet<EnvironmentSecret> EnvironmentSecrets => Set<EnvironmentSecret>();
@@ -250,6 +251,27 @@ public sealed class AutoTestAiDbContext : DbContext
         modelBuilder.Entity<SelfHealingAttempt>().Property(a => a.OriginalStrategy).HasMaxLength(50);
         modelBuilder.Entity<SelfHealingAttempt>().Property(a => a.RecoveredStrategy).HasMaxLength(50);
         modelBuilder.Entity<SelfHealingAttempt>().Property(a => a.ErrorMessage).HasMaxLength(2000);
+
+        // --- maintenance proposals (Phase 4 Slice 4, additive) ---
+        modelBuilder.Entity<MaintenanceProposal>().ToTable("maintenance_proposals");
+        modelBuilder.Entity<MaintenanceProposal>().HasIndex(p => new { p.ProjectId, p.Status });
+        modelBuilder.Entity<MaintenanceProposal>().HasIndex(p => new { p.TestCaseId, p.StepOrder });
+        // One open proposal per exact locator replacement: repeated and
+        // concurrent scans converge instead of duplicating proposals.
+        modelBuilder.Entity<MaintenanceProposal>()
+            .HasIndex(p => new { p.TestCaseId, p.TestCaseVersionId, p.StepOrder, p.ProposedStrategy, p.ProposedValue })
+            .IsUnique()
+            .HasFilter("\"Status\" = 'Proposed'");
+        modelBuilder.Entity<MaintenanceProposal>().Property(p => p.Status).HasConversion<string>();
+        modelBuilder.Entity<MaintenanceProposal>().Property(p => p.HealingStrategy).HasConversion<string>();
+        modelBuilder.Entity<MaintenanceProposal>().Property(p => p.StepAction).HasMaxLength(200);
+        modelBuilder.Entity<MaintenanceProposal>().Property(p => p.OriginalStrategy).HasMaxLength(50);
+        modelBuilder.Entity<MaintenanceProposal>().Property(p => p.OriginalValue).HasMaxLength(2000);
+        modelBuilder.Entity<MaintenanceProposal>().Property(p => p.ProposedStrategy).HasMaxLength(50);
+        modelBuilder.Entity<MaintenanceProposal>().Property(p => p.ProposedValue).HasMaxLength(2000);
+        modelBuilder.Entity<MaintenanceProposal>().Property(p => p.SignalType).HasMaxLength(100);
+        modelBuilder.Entity<MaintenanceProposal>().Property(p => p.RejectionReason).HasMaxLength(500);
+        modelBuilder.Entity<MaintenanceProposal>().Property(p => p.RowVersion).IsConcurrencyToken();
 
         // --- visual baselines (Phase 3 Slice 3C-4D-1, additive) ---
         modelBuilder.Entity<VisualBaseline>().ToTable("visual_baselines");

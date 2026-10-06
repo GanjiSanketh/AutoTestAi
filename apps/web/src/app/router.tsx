@@ -26,6 +26,7 @@ import { TicketsPage } from '../features/tickets/TicketsPage';
 import { ReportsPage } from '../features/reports/ReportsPage';
 import { AuditExplorerPage } from '../features/audit/AuditExplorerPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
+import { MaintenanceInboxPage } from '../features/maintenance/MaintenanceInboxPage';
 
 /**
  * Route structure (docs/02 §7). /login, /callback and /silent-renew are
@@ -71,6 +72,7 @@ export const router = createBrowserRouter([
           { path: 'tickets', element: <TicketsPage /> },
           { path: 'reports', element: <ReportsPage /> },
           { path: 'projects/:projectId/audit', element: <AuditExplorerPage /> },
+          { path: 'projects/:projectId/maintenance', element: <MaintenanceInboxPage /> },
           { path: 'settings', element: <SettingsPage /> },
         ],
       },

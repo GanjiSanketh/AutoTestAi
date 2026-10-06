@@ -238,6 +238,7 @@ app.MapAutoTicketEndpoints();
 app.MapSelfHealingEndpoints();
 app.MapDashboardEndpoints();
 app.MapAuditEndpoints();
+app.MapMaintenanceEndpoints();
 app.MapExecutionGridEndpoints();
 app.MapWebhookEndpoints();
 app.MapMobileEndpoints();

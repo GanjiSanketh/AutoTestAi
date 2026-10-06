@@ -16,6 +16,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/bugs', label: 'Bugs', permission: Permissions.BugsRead, group: 'modules' },
   { to: '/tickets', label: 'Tickets', permission: Permissions.TicketsRead, group: 'modules' },
   { to: '/reports', label: 'Reports', permission: Permissions.ReportsRead, group: 'modules' },
+  { to: '/maintenance', label: 'Maintenance', permission: Permissions.TestCasesRead, group: 'modules' },
   { to: '/settings', label: 'Settings', permission: Permissions.SettingsManage, group: 'system' },
 ];
 

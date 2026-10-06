@@ -308,3 +308,17 @@ public enum VisualBaselineStatus
     Active = 1,
     Superseded = 2
 }
+
+/// <summary>
+/// Lifecycle state for a human-gated test-maintenance proposal (Phase 4
+/// Slice 4). Proposed rows await an explicit maintenance decision; approval
+/// creates a new Pending test version through the existing version path
+/// (never an Approved version); stale rows become Superseded.
+/// </summary>
+public enum MaintenanceProposalStatus
+{
+    Proposed = 0,
+    Rejected = 1,
+    Applied = 2,
+    Superseded = 3
+}

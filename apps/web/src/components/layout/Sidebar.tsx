@@ -9,6 +9,7 @@ import {
   Ticket,
   BarChart3,
   Settings,
+  Wrench,
   Zap,
   X,
   type LucideIcon,
@@ -26,6 +27,7 @@ const ICONS: Record<string, LucideIcon> = {
   '/bugs': Bug,
   '/tickets': Ticket,
   '/reports': BarChart3,
+  '/maintenance': Wrench,
   '/settings': Settings,
 };
 
