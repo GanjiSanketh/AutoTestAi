@@ -55,3 +55,22 @@ public sealed class SuiteTestCase
     public Guid TestCaseId { get; set; }
     public int ExecutionOrder { get; set; }
 }
+
+/// <summary>
+/// Recurring execution cadence for a test suite (Phase 4 Slice 9B).
+/// Temporal owns firing/next-run; this row owns identity, cadence config,
+/// lifecycle, and last-run pointers. Never carries secrets or credentials.
+/// </summary>
+public sealed class TestSuiteSchedule : EntityBase
+{
+    public Guid ProjectId { get; set; }
+    public Guid SuiteId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string CronExpression { get; set; } = string.Empty;
+    public string TimeZoneId { get; set; } = "UTC";
+    public ScheduleStatus Status { get; set; } = ScheduleStatus.Active;
+    public ScheduleOverlapPolicy OverlapPolicy { get; set; } = ScheduleOverlapPolicy.Skip;
+    public DateTimeOffset? LastTriggeredAt { get; set; }
+    public Guid? LastExecutionId { get; set; }
+    public Guid? CreatedBy { get; set; }
+}

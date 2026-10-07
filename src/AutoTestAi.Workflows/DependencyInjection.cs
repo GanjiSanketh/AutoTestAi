@@ -16,6 +16,7 @@ public static class DependencyInjection
         services.Configure<TemporalOptions>(configuration.GetSection(TemporalOptions.SectionName));
         services.AddSingleton<ITestExecutionWorkflowStarter, TemporalWorkflowStarter>();
         services.AddSingleton<IExecutionWorkflowCoordinator, TemporalExecutionWorkflowCoordinator>();
+        services.AddSingleton<AutoTestAi.Application.TestCases.ISuiteScheduleCoordinator, TemporalSuiteScheduleCoordinator>();
         services.AddHostedService<TemporalWorkerService>();
         return services;
     }

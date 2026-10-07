@@ -42,7 +42,16 @@ public interface ISuiteStore
     Task<IReadOnlyList<SuiteExecutionSummaryDto>> GetExecutionHistoryAsync(
         Guid suiteId, ExecutionStatus? status, TriggerType? triggerType, int skip, int take, CancellationToken ct);
 
-    Task<SuiteReportDto?> GetReportDataAsync(Guid suiteId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct);
+    Task<SuiteReportDto?> GetReportDataAsync(Guid suiteId, DateTimeOffset? from, DateTimeOffset? to, TriggerType? trigger, CancellationToken ct);
+
+    Task<IReadOnlyList<TriggerBreakdownItem>> GetTriggerBreakdownAsync(Guid suiteId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct);
+
+    /// <summary>
+    /// Bounded daily trend inputs: executions in the window plus per-execution
+    /// test aggregates, so the service can bucket client-side without N+1 or
+    /// provider-specific date SQL. The window must be bounded by the caller.
+    /// </summary>
+    Task<SuiteTrendData> GetTrendDataAsync(Guid suiteId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct);
 
     Task<Execution?> GetExecutionByIdempotencyKeyAsync(Guid projectId, string idempotencyKey, CancellationToken ct);
 }

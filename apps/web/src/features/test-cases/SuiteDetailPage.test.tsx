@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SuiteDetailPage } from './SuiteDetailPage';
-import { suitesEndpoints } from '../../lib/api/endpoints/suites';
+import { suitesEndpoints, suiteSchedulesEndpoints } from '../../lib/api/endpoints/suites';
 import { useProfile } from '../../lib/auth/useProfile';
 import { ApiError } from '../../lib/api/client';
 import { Permissions } from '../../lib/auth/permissions';
@@ -15,6 +15,11 @@ vi.mock('../../lib/api/endpoints/suites', () => ({
     executions: (id: string, filters: unknown, page: number) => ['test-suites', 'executions', id, filters, page],
     report: (id: string, filters: unknown) => ['test-suites', 'report', id, filters],
   },
+  scheduleKeys: {
+    all: ['test-suite-schedules'],
+    list: (suiteId: string) => ['test-suite-schedules', 'list', suiteId],
+    details: (id: string) => ['test-suite-schedules', 'details', id],
+  },
   suitesEndpoints: {
     get: vi.fn(),
     getExecutions: vi.fn(),
@@ -22,10 +27,26 @@ vi.mock('../../lib/api/endpoints/suites', () => ({
     execute: vi.fn(),
     archive: vi.fn(),
   },
+  suiteSchedulesEndpoints: {
+    list: vi.fn(),
+    get: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    archive: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    runNow: vi.fn(),
+  },
 }));
 
 vi.mock('../../lib/auth/useProfile', () => ({
   useProfile: vi.fn(),
+}));
+
+// jsdom has no canvas: stub the renderer so chart options can be asserted
+// without zrender's asynchronous paint loop.
+vi.mock('echarts', () => ({
+  init: vi.fn(() => ({ setOption: vi.fn(), resize: vi.fn(), dispose: vi.fn() })),
 }));
 
 const mockedGet = vi.mocked(suitesEndpoints.get);
@@ -33,6 +54,14 @@ const mockedExecutions = vi.mocked(suitesEndpoints.getExecutions);
 const mockedReport = vi.mocked(suitesEndpoints.getReport);
 const mockedExecute = vi.mocked(suitesEndpoints.execute);
 const mockedArchive = vi.mocked(suitesEndpoints.archive);
+const mockedSchedules = vi.mocked(suiteSchedulesEndpoints.list);
+const mockedScheduleGet = vi.mocked(suiteSchedulesEndpoints.get);
+const mockedScheduleCreate = vi.mocked(suiteSchedulesEndpoints.create);
+const mockedScheduleUpdate = vi.mocked(suiteSchedulesEndpoints.update);
+const mockedScheduleArchive = vi.mocked(suiteSchedulesEndpoints.archive);
+const mockedSchedulePause = vi.mocked(suiteSchedulesEndpoints.pause);
+const mockedScheduleResume = vi.mocked(suiteSchedulesEndpoints.resume);
+const mockedScheduleRun = vi.mocked(suiteSchedulesEndpoints.runNow);
 const mockedProfile = vi.mocked(useProfile);
 
 function renderPage() {
@@ -81,7 +110,7 @@ const detail = (overrides = {}) => ({
   ...overrides,
 });
 
-const managerPerms = [Permissions.TestCasesManage, Permissions.ExecutionsRead, Permissions.ReportsRead];
+const managerPerms = [Permissions.TestCasesRead, Permissions.TestCasesManage, Permissions.ExecutionsRead, Permissions.ReportsRead];
 
 describe('SuiteDetailPage', () => {
   beforeEach(() => {
@@ -89,6 +118,8 @@ describe('SuiteDetailPage', () => {
     vi.stubGlobal('confirm', vi.fn(() => true));
     mockedExecutions.mockResolvedValue({ items: [], totalCount: 0, page: 1, pageSize: 25 } as never);
     mockedReport.mockResolvedValue(null as never);
+    mockedSchedules.mockResolvedValue([]);
+    mockedScheduleGet.mockResolvedValue(null as never);
   });
   afterEach(() => {
     cleanup();
@@ -156,12 +187,21 @@ describe('SuiteDetailPage', () => {
       suiteId: 's1', suiteName: 'Regression', totalExecutions: 1,
       passedCount: 2, failedCount: 0, cancelledCount: 0, timedOutCount: 0, errorCount: 0,
       passRate: 100, totalDurationMs: 2000, averageDurationMs: 1000, latestExecutionAt: '2026-10-01T00:00:00Z',
+      triggerBreakdown: [
+        { trigger: 'Manual', total: 1, passed: 2, failed: 0, passRate: 100 },
+      ],
+      trend: [
+        { date: '2026-10-01', total: 1, passed: 2, failed: 0, cancelled: 0, timedOut: 0, error: 0, passRate: 100, totalDurationMs: 2000 },
+      ],
     } as never);
     renderPage();
     expect(await screen.findByText('Execution history')).toBeTruthy();
     expect(screen.getByText('Execution report')).toBeTruthy();
     expect(screen.getAllByText('Passed').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Total executions')).toBeTruthy();
+    expect(screen.getByText('By trigger')).toBeTruthy();
+    expect(screen.getAllByText('Manual').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Daily trend (UTC)')).toBeTruthy();
   });
 
   it('hides management actions from viewers but keeps history and report', async () => {
@@ -190,5 +230,144 @@ describe('SuiteDetailPage', () => {
     mockedGet.mockRejectedValue(new ApiError(500, 'INTERNAL_ERROR', 'Boom'));
     renderPage();
     expect(await screen.findByText('Something went wrong')).toBeTruthy();
+  });
+
+  it('renders schedules with status and cadence', async () => {
+    profileWith(managerPerms);
+    mockedGet.mockResolvedValue(detail() as never);
+    mockedSchedules.mockResolvedValue([{
+      id: 'sch1', projectId: 'p1', suiteId: 's1', suiteName: 'Regression',
+      name: 'Nightly', cronExpression: '30 2 * * *', timeZoneId: 'UTC',
+      status: 'Active', overlapPolicy: 'Skip',
+      lastTriggeredAt: null, lastExecutionId: null, nextRunAt: null,
+      createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+    }]);
+    renderPage();
+    expect(await screen.findByText('Schedules')).toBeTruthy();
+    expect(await screen.findByText('Nightly')).toBeTruthy();
+    expect(screen.getByText('30 2 * * * · UTC · overlap Skip')).toBeTruthy();
+  });
+
+  it('creates a schedule from the form', async () => {
+    profileWith(managerPerms);
+    mockedGet.mockResolvedValue(detail() as never);
+    mockedSchedules.mockResolvedValue([]);
+    mockedScheduleCreate.mockResolvedValue({ id: 'sch9' } as never);
+    renderPage();
+    fireEvent.click(await screen.findByText('New schedule'));
+    fireEvent.change(screen.getByLabelText('Name *'), { target: { value: 'Nightly' } });
+    fireEvent.change(screen.getByLabelText('Cron expression *'), { target: { value: '30 2 * * *' } });
+    fireEvent.click(screen.getByText('Create schedule'));
+    await waitFor(() => expect(mockedScheduleCreate).toHaveBeenCalledWith('p1', 's1', expect.objectContaining({
+      name: 'Nightly',
+      cronExpression: '30 2 * * *',
+      timeZoneId: 'UTC',
+      overlapPolicy: 'Skip',
+    })));
+  });
+
+  it('validates the schedule form without calling the API', async () => {
+    profileWith(managerPerms);
+    mockedGet.mockResolvedValue(detail() as never);
+    mockedSchedules.mockResolvedValue([]);
+    renderPage();
+    fireEvent.click(await screen.findByText('New schedule'));
+    fireEvent.click(screen.getByText('Create schedule'));
+    expect(await screen.findByText('Schedule name is required.')).toBeTruthy();
+    expect(mockedScheduleCreate).not.toHaveBeenCalled();
+  });
+
+  it('pauses and runs a schedule now', async () => {
+    profileWith(managerPerms);
+    mockedGet.mockResolvedValue(detail() as never);
+    mockedSchedules.mockResolvedValue([{
+      id: 'sch1', projectId: 'p1', suiteId: 's1', suiteName: 'Regression',
+      name: 'Nightly', cronExpression: '30 2 * * *', timeZoneId: 'UTC',
+      status: 'Active', overlapPolicy: 'Skip',
+      lastTriggeredAt: null, lastExecutionId: null, nextRunAt: null,
+      createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+    }]);
+    mockedSchedulePause.mockResolvedValue(undefined as never);
+    mockedScheduleRun.mockResolvedValue({ executionId: 'e9' } as never);
+    renderPage();
+    fireEvent.click(await screen.findByLabelText('Pause schedule Nightly'));
+    await waitFor(() => expect(mockedSchedulePause).toHaveBeenCalledWith('sch1'));
+    fireEvent.click(await screen.findByLabelText('Run schedule Nightly now'));
+    await waitFor(() => expect(mockedScheduleRun).toHaveBeenCalledWith('sch1'));
+  });
+
+  it('expands a schedule to show the next run', async () => {
+    profileWith(managerPerms);
+    mockedGet.mockResolvedValue(detail() as never);
+    mockedSchedules.mockResolvedValue([{
+      id: 'sch1', projectId: 'p1', suiteId: 's1', suiteName: 'Regression',
+      name: 'Nightly', cronExpression: '30 2 * * *', timeZoneId: 'UTC',
+      status: 'Active', overlapPolicy: 'Skip',
+      lastTriggeredAt: null, lastExecutionId: null, nextRunAt: null,
+      createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+    }]);
+    mockedScheduleGet.mockResolvedValue({
+      id: 'sch1', nextRunAt: '2026-10-08T02:30:00Z',
+    } as never);
+    renderPage();
+    fireEvent.click(await screen.findByText('Nightly'));
+    expect(await screen.findByText(/Next:/)).toBeTruthy();
+    expect(mockedScheduleGet).toHaveBeenCalledWith('sch1');
+  });
+
+  it('edits and deletes a schedule', async () => {
+    profileWith(managerPerms);
+    mockedGet.mockResolvedValue(detail() as never);
+    const sched = {
+      id: 'sch1', projectId: 'p1', suiteId: 's1', suiteName: 'Regression',
+      name: 'Nightly', cronExpression: '30 2 * * *', timeZoneId: 'UTC',
+      status: 'Active', overlapPolicy: 'Skip',
+      lastTriggeredAt: null, lastExecutionId: null, nextRunAt: null,
+      createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+    };
+    mockedSchedules.mockResolvedValue([sched]);
+    mockedScheduleUpdate.mockResolvedValue(sched as never);
+    mockedScheduleArchive.mockResolvedValue(undefined as never);
+    renderPage();
+    fireEvent.click(await screen.findByLabelText('Edit schedule Nightly'));
+    fireEvent.change(screen.getByLabelText('Name *'), { target: { value: 'Nightly v2' } });
+    fireEvent.click(screen.getByText('Save changes'));
+    await waitFor(() => expect(mockedScheduleUpdate).toHaveBeenCalledWith('sch1', expect.objectContaining({
+      name: 'Nightly v2',
+    })));
+    fireEvent.click(await screen.findByLabelText('Delete schedule Nightly'));
+    await waitFor(() => expect(mockedScheduleArchive).toHaveBeenCalledWith('sch1'));
+  });
+
+  it('resumes a disabled schedule', async () => {
+    profileWith(managerPerms);
+    mockedGet.mockResolvedValue(detail() as never);
+    mockedSchedules.mockResolvedValue([{
+      id: 'sch1', projectId: 'p1', suiteId: 's1', suiteName: 'Regression',
+      name: 'Nightly', cronExpression: '30 2 * * *', timeZoneId: 'UTC',
+      status: 'Disabled', overlapPolicy: 'Skip',
+      lastTriggeredAt: null, lastExecutionId: null, nextRunAt: null,
+      createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+    }]);
+    mockedScheduleResume.mockResolvedValue(undefined as never);
+    renderPage();
+    fireEvent.click(await screen.findByLabelText('Resume schedule Nightly'));
+    await waitFor(() => expect(mockedScheduleResume).toHaveBeenCalledWith('sch1'));
+  });
+
+  it('hides schedule management from viewers', async () => {
+    profileWith([Permissions.TestCasesRead, Permissions.ExecutionsRead, Permissions.ReportsRead]);
+    mockedGet.mockResolvedValue(detail() as never);
+    mockedSchedules.mockResolvedValue([{
+      id: 'sch1', projectId: 'p1', suiteId: 's1', suiteName: 'Regression',
+      name: 'Nightly', cronExpression: '30 2 * * *', timeZoneId: 'UTC',
+      status: 'Active', overlapPolicy: 'Skip',
+      lastTriggeredAt: null, lastExecutionId: null, nextRunAt: null,
+      createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+    }]);
+    renderPage();
+    await screen.findByText('Nightly');
+    expect(screen.queryByText('New schedule')).toBeNull();
+    expect(screen.queryByLabelText('Pause schedule Nightly')).toBeNull();
   });
 });

@@ -27,6 +27,7 @@ public sealed class AutoTestAiDbContext : DbContext
     public DbSet<TestCaseVersion> TestCaseVersions => Set<TestCaseVersion>();
     public DbSet<TestSuite> TestSuites => Set<TestSuite>();
     public DbSet<SuiteTestCase> SuiteTestCases => Set<SuiteTestCase>();
+    public DbSet<TestSuiteSchedule> TestSuiteSchedules => Set<TestSuiteSchedule>();
     public DbSet<Execution> Executions => Set<Execution>();
     public DbSet<ExecutionTest> ExecutionTests => Set<ExecutionTest>();
     public DbSet<ExecutionStepResult> ExecutionStepResults => Set<ExecutionStepResult>();
@@ -93,6 +94,23 @@ public sealed class AutoTestAiDbContext : DbContext
         modelBuilder.Entity<TestSuite>().Property(s => s.Status).HasConversion<string>();
         modelBuilder.Entity<SuiteTestCase>().ToTable("suite_test_cases")
             .HasKey(x => new { x.SuiteId, x.TestCaseId });
+
+        // --- suite schedules (Phase 4 Slice 9B) ---
+        modelBuilder.Entity<TestSuiteSchedule>().ToTable("test_suite_schedules");
+        modelBuilder.Entity<TestSuiteSchedule>().HasIndex(s => s.ProjectId);
+        modelBuilder.Entity<TestSuiteSchedule>().HasIndex(s => s.SuiteId);
+        modelBuilder.Entity<TestSuiteSchedule>().Property(s => s.Status).HasConversion<string>();
+        modelBuilder.Entity<TestSuiteSchedule>().Property(s => s.OverlapPolicy).HasConversion<string>();
+        modelBuilder.Entity<TestSuiteSchedule>()
+            .HasOne<TestSuite>()
+            .WithMany()
+            .HasForeignKey(s => s.SuiteId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<TestSuiteSchedule>()
+            .HasOne<Project>()
+            .WithMany()
+            .HasForeignKey(s => s.ProjectId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         // --- execution ---
         modelBuilder.Entity<Execution>().ToTable("executions");

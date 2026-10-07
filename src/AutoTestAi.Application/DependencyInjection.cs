@@ -39,6 +39,7 @@ public static class DependencyInjection
         services.AddScoped<ITestCaseService, TestCaseService>();
         services.AddScoped<TestCases.ISuiteService, TestCases.SuiteService>();
         services.AddScoped<TestCases.ISuiteExecutionService, TestCases.SuiteExecutionService>();
+        services.AddScoped<TestCases.ISuiteScheduleService, TestCases.SuiteScheduleService>();
         services.AddScoped<TestCases.IJiraChangeCheckService, TestCases.JiraChangeCheckService>();
         services.AddScoped<ITestExecutionService, TestExecutionService>();
         services.AddScoped<IExecutionEngine, ExecutionEngine>();

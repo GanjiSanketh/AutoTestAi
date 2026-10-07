@@ -62,6 +62,9 @@ users/projects → audit_events
 ### suite_test_cases
 `suite_id FK`, `test_case_id FK`, `execution_order`, composite PK.
 
+### test_suite_schedules (Slice 9B)
+`id UUID PK`, `project_id FK` (Restrict), `suite_id FK` → `test_suites` (Restrict), `name`, `cron_expression`, `time_zone_id` (IANA, default `UTC`), `status` (`Active`/`Disabled`/`Archived`), `overlap_policy` (`Skip`/`Allow`), `last_triggered_at NULL`, `last_execution_id NULL`, `created_by`, timestamps; indexes `(project_id)`, `(suite_id)`; unique `(project_id, lower(name))` expression index (service layer enforces the same rule). Temporal owns firing/next-run — `next_run_at` is deliberately NOT persisted. No secret/credential columns.
+
 ### executions
 `id UUID PK`, `project_id FK`, `suite_id`, `status`, `trigger_type`, `environment_id`, `workflow_id`, `idempotency_key NULL` (unique per project when set), `started_at`, `completed_at`, `created_by`, `created_at`.
 

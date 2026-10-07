@@ -1,9 +1,10 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CiCdSettings } from './CiCdSettings';
 import { ciCdEndpoints } from '../../lib/api/endpoints/cicd';
 import { projectsEndpoints } from '../../lib/api/endpoints/projects';
+import { suitesEndpoints } from '../../lib/api/endpoints/suites';
 import { useProfile } from '../../lib/auth/useProfile';
 import { Permissions } from '../../lib/auth/permissions';
 import { useAppStore } from '../../stores/useAppStore';
@@ -34,6 +35,16 @@ vi.mock('../../lib/api/endpoints/projects', () => ({
   },
 }));
 
+vi.mock('../../lib/api/endpoints/suites', () => ({
+  suiteKeys: {
+    all: ['test-suites'],
+    list: (projectId: string, filters: unknown, page: number) => ['test-suites', 'list', projectId, filters, page],
+  },
+  suitesEndpoints: {
+    list: vi.fn(),
+  },
+}));
+
 vi.mock('../../lib/auth/useProfile', () => ({
   useProfile: vi.fn(),
 }));
@@ -42,6 +53,7 @@ const mockedList = vi.mocked(ciCdEndpoints.list);
 const mockedDeliveries = vi.mocked(ciCdEndpoints.deliveries);
 const mockedProjects = vi.mocked(projectsEndpoints.list);
 const mockedEnvironments = vi.mocked(projectsEndpoints.environments);
+const mockedSuites = vi.mocked(suitesEndpoints.list);
 const mockedProfile = vi.mocked(useProfile);
 
 function renderWithClient() {
@@ -58,6 +70,13 @@ describe('CiCdSettings', () => {
     useAppStore.setState({ currentProjectId: 'p1' });
     mockedProjects.mockResolvedValue({ items: [{ id: 'p1', name: 'Alpha' }], totalCount: 1, page: 1, pageSize: 100 } as never);
     mockedEnvironments.mockResolvedValue([{ id: 'env-1', name: 'QA' }] as never);
+    mockedSuites.mockResolvedValue({
+      items: [
+        { id: 'suite-1', projectId: 'p1', name: 'Regression', testCount: 4, updatedAt: '2026-10-01T00:00:00Z' },
+        { id: 'suite-2', projectId: 'p1', name: 'Smoke', testCount: 2, updatedAt: '2026-10-01T00:00:00Z' },
+      ],
+      totalCount: 2, page: 1, pageSize: 100,
+    } as never);
     mockedList.mockResolvedValue([
       {
         id: 'int-1',
@@ -121,8 +140,7 @@ describe('CiCdSettings', () => {
     );
   });
 
-  it('shows delivery history with retry for failed deliveries', async () => {
-    mockedDeliveries.mockResolvedValue({
+  it('shows delivery history with retry for failed deliveries', async () => {    mockedDeliveries.mockResolvedValue({
       items: [
         {
           id: 'del-1',
@@ -149,5 +167,31 @@ describe('CiCdSettings', () => {
     await waitFor(() => expect(screen.getByText('Failed')).toBeTruthy());
     expect(screen.getByText('invalid_suite')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+  });
+
+  it('offers project suites in a picker instead of a raw GUID input', async () => {
+    renderWithClient();
+    const picker = (await screen.findByLabelText('Default suite (required for execution)')) as HTMLSelectElement;
+    expect(picker.tagName).toBe('SELECT');
+    expect(screen.getByText('Regression (4 tests)')).toBeTruthy();
+    expect(screen.getByText('Smoke (2 tests)')).toBeTruthy();
+  });
+
+  it('persists the picked suite through the existing backend contract', async () => {
+    const mockedUpsert = vi.mocked(ciCdEndpoints.upsert);
+    mockedUpsert.mockResolvedValue({} as never);
+    renderWithClient();
+    const picker = (await screen.findByLabelText('Default suite (required for execution)')) as HTMLSelectElement;
+    fireEvent.change(picker, { target: { value: 'suite-2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
+    await waitFor(() => expect(mockedUpsert).toHaveBeenCalledWith('p1', expect.objectContaining({
+      defaultSuiteId: 'suite-2',
+    })));
+  });
+
+  it('explains an empty suite list without breaking the form', async () => {
+    mockedSuites.mockResolvedValue({ items: [], totalCount: 0, page: 1, pageSize: 100 } as never);
+    renderWithClient();
+    expect(await screen.findByText(/This project has no test suites yet/)).toBeTruthy();
   });
 });

@@ -9,13 +9,16 @@ using System.Text.Json;
 namespace AutoTestAi.Application.TestCases;
 
 /// <summary>
-/// Manual suite execution orchestration (Phase 4 Slice 9A).
+/// Suite execution orchestration (Phase 4 Slices 9A/9B).
 /// Reuses the existing execution pipeline: every suite member fans out to
 /// <see cref="ITestExecutionService.StartAsSystemAsync"/> with the exact
 /// latest Approved <see cref="TestCaseVersion"/> bound upfront, so the
 /// engine's approval gate, assignment fencing, retry behavior and audit
 /// trail are unchanged. All members are validated BEFORE any execution is
 /// created — a suite is never partially started.
+/// Manual (<see cref="ExecuteAsync"/>) and system/scheduled
+/// (<see cref="ExecuteAsSystemAsync"/>) entries share one core and differ
+/// only in authorization, trigger, idempotency basis, and audit identity.
 /// </summary>
 public sealed class SuiteExecutionService : ISuiteExecutionService
 {
@@ -48,30 +51,61 @@ public sealed class SuiteExecutionService : ISuiteExecutionService
         _audit = audit;
     }
 
-    public async Task<ExecuteSuiteResult> ExecuteAsync(Guid projectId, Guid suiteId, ExecuteSuiteCommand command, CancellationToken cancellationToken)
+    /// <summary>
+    /// Manual Run Now (Slice 9A). Authorizes the caller, then fans out with
+    /// <see cref="TriggerType.Manual"/>.
+    /// </summary>
+    public Task<ExecuteSuiteResult> ExecuteAsync(Guid projectId, Guid suiteId, ExecuteSuiteCommand command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
 
+        if (command.SuiteId != Guid.Empty && command.SuiteId != suiteId)
+            throw new ValidationException("Suite id mismatch.",
+                [new FieldError("suiteId", "The suite id in the body must match the route.")]);
+
+        return ExecuteCoreAsync(
+            projectId, suiteId,
+            command.IdempotencyKey,
+            TriggerType.Manual,
+            scheduleId: null,
+            requireAuthorization: true,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// System-initiated suite run (Slice 9B scheduled execution). No caller
+    /// authorization — the scheduler (Temporal activity) validates
+    /// schedule/suite ownership before invoking. Only callable server-side.
+    /// </summary>
+    public Task<ExecuteSuiteResult> ExecuteAsSystemAsync(
+        Guid projectId, Guid suiteId, TriggerType trigger, string? idempotencyKey, Guid? scheduleId, CancellationToken cancellationToken)
+        => ExecuteCoreAsync(
+            projectId, suiteId,
+            idempotencyKey,
+            trigger,
+            scheduleId,
+            requireAuthorization: false,
+            cancellationToken);
+
+    private async Task<ExecuteSuiteResult> ExecuteCoreAsync(
+        Guid projectId, Guid suiteId, string? idempotencyKey, TriggerType trigger,
+        Guid? scheduleId, bool requireAuthorization, CancellationToken cancellationToken)
+    {
         if (projectId == Guid.Empty)
             throw new ValidationException("Project id is required.",
                 [new FieldError("projectId", "Project id is required.")]);
 
         // Authorize once for the project before touching suite state.
-        await _authorization.RequireProjectAccessAsync(
-            projectId, Permissions.TestCasesManage, cancellationToken);
+        // System callers (schedule activity) run server-side without a user
+        // session after validating ownership themselves.
+        if (requireAuthorization)
+            await _authorization.RequireProjectAccessAsync(
+                projectId, Permissions.TestCasesManage, cancellationToken);
 
-        var idempotencyKey = string.IsNullOrWhiteSpace(command.IdempotencyKey)
-            ? null
-            : command.IdempotencyKey.Trim();
-        if (idempotencyKey is not null && idempotencyKey.Length > MaxSuiteIdempotencyKeyLength)
+        var key = string.IsNullOrWhiteSpace(idempotencyKey) ? null : idempotencyKey.Trim();
+        if (key is not null && key.Length > MaxSuiteIdempotencyKeyLength)
             throw new ValidationException("Idempotency key is too long.",
                 [new FieldError("idempotencyKey", $"Idempotency key must be at most {MaxSuiteIdempotencyKeyLength} characters.")]);
-
-        // Suite identity comes from the route; a body suite id that disagrees
-        // is rejected rather than silently preferred either way.
-        if (command.SuiteId != Guid.Empty && command.SuiteId != suiteId)
-            throw new ValidationException("Suite id mismatch.",
-                [new FieldError("suiteId", "The suite id in the body must match the route.")]);
 
         var suite = await _suites.GetByIdWithMembersAsync(suiteId, cancellationToken);
         if (suite is null)
@@ -119,12 +153,12 @@ public sealed class SuiteExecutionService : ISuiteExecutionService
             bound.Add((member, version));
         }
 
-        // Suite-level fast path: a previous manual run with this key returns
-        // its head execution. Per-member keys below make retries converge
-        // even without this hit (StartAsSystemAsync returns Duplicated).
-        if (idempotencyKey is not null)
+        // Suite-level fast path: a previous run with this key returns its
+        // head execution. Per-member keys below make retries converge even
+        // without this hit (StartAsSystemAsync returns Duplicated).
+        if (key is not null)
         {
-            var existing = await _suites.GetExecutionByIdempotencyKeyAsync(projectId, idempotencyKey, cancellationToken);
+            var existing = await _suites.GetExecutionByIdempotencyKeyAsync(projectId, key, cancellationToken);
             if (existing is not null)
             {
                 return new ExecuteSuiteResult(
@@ -139,7 +173,7 @@ public sealed class SuiteExecutionService : ISuiteExecutionService
         // Fan out through the existing execution seam (engine, grid
         // scheduler, assignment fencing, retries all unchanged). The exact
         // Approved version id is bound here and never re-resolved later.
-        var baseKey = idempotencyKey ?? Guid.NewGuid().ToString("N");
+        var baseKey = key ?? Guid.NewGuid().ToString("N");
         var executionIds = new List<Guid>(bound.Count);
         for (var i = 0; i < bound.Count; i++)
         {
@@ -153,7 +187,7 @@ public sealed class SuiteExecutionService : ISuiteExecutionService
                 suiteId,
                 null, // VariableOverrides
                 null, // SecretRefOverrides
-                TriggerType.Manual,
+                trigger,
                 null, // MobileDevicePoolId
                 null); // MobileAppId
 
@@ -168,7 +202,8 @@ public sealed class SuiteExecutionService : ISuiteExecutionService
                 suiteId = suite.Id,
                 suiteName = suite.Name,
                 testCount = members.Count,
-                triggerType = "manual",
+                triggerType = trigger.ToString().ToLowerInvariant(),
+                scheduleId,
                 executionIds,
             }), cancellationToken);
 

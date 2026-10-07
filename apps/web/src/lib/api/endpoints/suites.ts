@@ -115,6 +115,59 @@ export interface SuiteReport {
   totalDurationMs: number;
   averageDurationMs: number;
   latestExecutionAt: string | null;
+  triggerBreakdown: TriggerBreakdownItem[];
+  trend: SuiteReportTrendPoint[];
+}
+
+export interface TriggerBreakdownItem {
+  trigger: string;
+  total: number;
+  passed: number;
+  failed: number;
+  passRate: number | null;
+}
+
+export interface SuiteReportTrendPoint {
+  date: string;
+  total: number;
+  passed: number;
+  failed: number;
+  cancelled: number;
+  timedOut: number;
+  error: number;
+  passRate: number | null;
+  totalDurationMs: number;
+}
+
+export interface SuiteSchedule {
+  id: string;
+  projectId: string;
+  suiteId: string;
+  suiteName: string;
+  name: string;
+  cronExpression: string;
+  timeZoneId: string;
+  status: string;
+  overlapPolicy: string;
+  lastTriggeredAt: string | null;
+  lastExecutionId: string | null;
+  nextRunAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSuiteScheduleInput {
+  name: string;
+  cronExpression: string;
+  timeZoneId?: string;
+  overlapPolicy?: string;
+}
+
+export interface UpdateSuiteScheduleInput {
+  name: string;
+  cronExpression: string;
+  timeZoneId?: string;
+  overlapPolicy?: string;
 }
 
 export interface SuiteExecutionHistoryFilters {
@@ -125,6 +178,8 @@ export interface SuiteExecutionHistoryFilters {
 export interface SuiteReportFilters {
   from?: string;
   to?: string;
+  trigger?: string;
+  groupBy?: string;
 }
 
 function toQuery(params: Record<string, string | number | undefined>): string {
@@ -137,8 +192,34 @@ function toQuery(params: Record<string, string | number | undefined>): string {
 }
 
 function reportFiltersToQuery(filters: SuiteReportFilters): string {
-  return toQuery({ from: filters.from, to: filters.to });
+  return toQuery({ from: filters.from, to: filters.to, trigger: filters.trigger, groupBy: filters.groupBy });
 }
+
+export const scheduleKeys = {
+  all: ['test-suite-schedules'] as const,
+  list: (suiteId: string) => [...scheduleKeys.all, 'list', suiteId] as const,
+  details: (id: string) => [...scheduleKeys.all, 'details', id] as const,
+};
+
+export const suiteSchedulesEndpoints = {
+  list: (projectId: string, suiteId: string) =>
+    api.get<SuiteSchedule[]>(`/api/v1/projects/${projectId}/test-suites/${suiteId}/schedules`),
+  get: (scheduleId: string) =>
+    api.get<SuiteSchedule>(`/api/v1/test-suite-schedules/${scheduleId}`),
+  create: (projectId: string, suiteId: string, input: CreateSuiteScheduleInput) =>
+    api.post<SuiteSchedule>(`/api/v1/projects/${projectId}/test-suites/${suiteId}/schedules`, input),
+  update: (scheduleId: string, input: UpdateSuiteScheduleInput) =>
+    api.put<SuiteSchedule>(`/api/v1/test-suite-schedules/${scheduleId}`, input),
+  archive: (scheduleId: string) =>
+    api.delete<void>(`/api/v1/test-suite-schedules/${scheduleId}`),
+  pause: (scheduleId: string) =>
+    api.post<void>(`/api/v1/test-suite-schedules/${scheduleId}/pause`, {}),
+  resume: (scheduleId: string) =>
+    api.post<void>(`/api/v1/test-suite-schedules/${scheduleId}/resume`, {}),
+  runNow: (scheduleId: string, idempotencyKey?: string) =>
+    api.post<ExecuteSuiteResult>(`/api/v1/test-suite-schedules/${scheduleId}/run-now`,
+      idempotencyKey ? { idempotencyKey } : {}),
+};
 
 export const suiteKeys = {
   all: ['test-suites'] as const,

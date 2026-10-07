@@ -96,7 +96,9 @@ public sealed record ExecuteSuiteResult(
     DateTimeOffset CreatedAt);
 
 /// <summary>
-/// Suite execution report.
+/// Suite execution report. TriggerBreakdown and Trend are additive Slice 9B
+/// extensions: existing consumers that omit the new filters observe the same
+/// base fields as before plus an empty trend and a full-window breakdown.
 /// </summary>
 public sealed record SuiteReportDto(
     Guid SuiteId,
@@ -110,7 +112,58 @@ public sealed record SuiteReportDto(
     double? PassRate,
     long TotalDurationMs,
     long AverageDurationMs,
-    DateTimeOffset? LatestExecutionAt);
+    DateTimeOffset? LatestExecutionAt,
+    IReadOnlyList<TriggerBreakdownItem> TriggerBreakdown,
+    IReadOnlyList<SuiteReportTrendPoint> Trend);
+
+/// <summary>
+/// Per-trigger aggregate within a suite report window. Total counts terminal
+/// executions; the outcome fields count their tests.
+/// </summary>
+public sealed record TriggerBreakdownItem(
+    string Trigger,
+    int Total,
+    int Passed,
+    int Failed,
+    double? PassRate);
+
+/// <summary>
+/// One daily bucket of a suite report trend. Total counts terminal
+/// executions that day; the outcome fields count their tests.
+/// </summary>
+public sealed record SuiteReportTrendPoint(
+    DateOnly Date,
+    int Total,
+    int Passed,
+    int Failed,
+    int Cancelled,
+    int TimedOut,
+    int Error,
+    double? PassRate,
+    long TotalDurationMs);
+
+/// <summary>
+/// Raw bounded trend inputs for in-memory day bucketing (no N+1, no
+/// provider-specific date functions).
+/// </summary>
+public sealed record SuiteTrendData(
+    IReadOnlyList<SuiteTrendExecution> Executions,
+    IReadOnlyDictionary<Guid, SuiteTrendTests> TestsByExecution);
+
+/// <summary>One terminal execution in a trend window.</summary>
+public sealed record SuiteTrendExecution(
+    Guid ExecutionId,
+    string Trigger,
+    DateTimeOffset CreatedAt);
+
+/// <summary>Test aggregates for one execution.</summary>
+public sealed record SuiteTrendTests(
+    int Passed,
+    int Failed,
+    int Cancelled,
+    int TimedOut,
+    int Error,
+    long TotalDurationMs);
 
 /// <summary>
 /// Suite execution summary for list view.
@@ -176,11 +229,14 @@ public sealed record SuiteExecutionHistoryFilters(
     string? TriggerType);
 
 /// <summary>
-/// Suite filters for report.
+/// Suite filters for report. Trigger and GroupBy are optional Slice 9B
+/// extensions; omitting them preserves the Slice 9A response shape.
 /// </summary>
 public sealed record SuiteReportFilters(
     DateTimeOffset? From,
-    DateTimeOffset? To);
+    DateTimeOffset? To,
+    string? Trigger = null,
+    string? GroupBy = null);
 
 /// <summary>
 /// Pagination parameters.

@@ -1,14 +1,22 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Play, Archive, Edit } from 'lucide-react';
+import { Play, Archive, Edit, Clock, Plus } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Skeleton } from '../../components/ui/skeleton';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { ErrorState } from '../../components/common/ErrorState';
-import { suiteKeys, suitesEndpoints, type ExecuteSuiteResult } from '../../lib/api/endpoints/suites';
+import { Chart } from '../../components/common/Chart';
+import {
+  suiteKeys,
+  suitesEndpoints,
+  scheduleKeys,
+  suiteSchedulesEndpoints,
+  type ExecuteSuiteResult,
+  type SuiteSchedule,
+} from '../../lib/api/endpoints/suites';
 import { useProfile } from '../../lib/auth/useProfile';
 import { Permissions, hasPermission } from '../../lib/auth/permissions';
 
@@ -37,9 +45,338 @@ function statusTone(status: string): 'success' | 'warning' | 'info' | 'neutral' 
 const TRIGGER_LABELS: Record<string, string> = {
   Manual: 'Manual',
   Ci: 'CI/CD',
+  Schedule: 'Scheduled',
   Scheduled: 'Scheduled',
   Webhook: 'Webhook',
 };
+
+const TIMEZONE_SUGGESTIONS = ['UTC', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'Europe/London', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Singapore', 'Australia/Sydney'];
+
+function scheduleTone(status: string): 'success' | 'warning' | 'neutral' | 'info' {
+  switch (status) {
+    case 'Active':
+      return 'success';
+    case 'Disabled':
+      return 'warning';
+    case 'Archived':
+      return 'neutral';
+    default:
+      return 'info';
+  }
+}
+
+function SuiteSchedulesCard({
+  projectId,
+  suiteId,
+  suiteActive,
+  canManage,
+  onError,
+}: {
+  projectId: string;
+  suiteId: string;
+  suiteActive: boolean;
+  canManage: boolean;
+  onError: (message: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<SuiteSchedule | null>(null);
+  const [name, setName] = useState('');
+  const [cron, setCron] = useState('');
+  const [timeZone, setTimeZone] = useState('UTC');
+  const [overlap, setOverlap] = useState('Skip');
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const schedules = useQuery({
+    queryKey: scheduleKeys.list(suiteId),
+    queryFn: () => suiteSchedulesEndpoints.list(projectId, suiteId),
+    enabled: !!suiteId,
+    staleTime: 15_000,
+  });
+
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const scheduleDetails = useQuery({
+    queryKey: scheduleKeys.details(expandedId ?? ''),
+    queryFn: () => suiteSchedulesEndpoints.get(expandedId!),
+    enabled: !!expandedId,
+    staleTime: 15_000,
+  });
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: scheduleKeys.list(suiteId) });
+    if (expandedId) {
+      queryClient.invalidateQueries({ queryKey: scheduleKeys.details(expandedId) });
+    }
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      editing
+        ? suiteSchedulesEndpoints.update(editing.id, {
+            name: name.trim(),
+            cronExpression: cron.trim(),
+            timeZoneId: timeZone.trim() || 'UTC',
+            overlapPolicy: overlap,
+          })
+        : suiteSchedulesEndpoints.create(projectId, suiteId, {
+            name: name.trim(),
+            cronExpression: cron.trim(),
+            timeZoneId: timeZone.trim() || 'UTC',
+            overlapPolicy: overlap,
+          }),
+    onSuccess: () => {
+      setShowForm(false);
+      setEditing(null);
+      setFormError(null);
+      setSaving(false);
+      invalidate();
+    },
+    onError: (error: any) => {
+      setFormError(error.message ?? 'Failed to save schedule.');
+      setSaving(false);
+    },
+  });
+
+  const actionMutation = useMutation({
+    mutationFn: async (input: { kind: 'pause' | 'resume' | 'archive' | 'run'; id: string }) => {
+      switch (input.kind) {
+        case 'pause':
+          await suiteSchedulesEndpoints.pause(input.id);
+          return;
+        case 'resume':
+          await suiteSchedulesEndpoints.resume(input.id);
+          return;
+        case 'archive':
+          await suiteSchedulesEndpoints.archive(input.id);
+          return;
+        case 'run':
+          await suiteSchedulesEndpoints.runNow(input.id);
+          return;
+      }
+    },
+    onSuccess: (_, input) => {
+      invalidate();
+      if (input.kind === 'run') {
+        queryClient.invalidateQueries({ queryKey: suiteKeys.all });
+      }
+    },
+    onError: (error: any) => {
+      onError(error.message ?? 'Schedule action failed.');
+    },
+  });
+
+  const openCreate = () => {
+    setEditing(null);
+    setName('');
+    setCron('');
+    setTimeZone('UTC');
+    setOverlap('Skip');
+    setFormError(null);
+    setShowForm(true);
+  };
+
+  const openEdit = (schedule: SuiteSchedule) => {
+    setEditing(schedule);
+    setName(schedule.name);
+    setCron(schedule.cronExpression);
+    setTimeZone(schedule.timeZoneId);
+    setOverlap(schedule.overlapPolicy);
+    setFormError(null);
+    setShowForm(true);
+  };
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) {
+      setFormError('Schedule name is required.');
+      return;
+    }
+    if (!cron.trim()) {
+      setFormError('Cron expression is required (e.g. "30 2 * * *").');
+      return;
+    }
+    setSaving(true);
+    saveMutation.mutate();
+  };
+
+  const handleAction = (kind: 'pause' | 'resume' | 'archive' | 'run', schedule: SuiteSchedule) => {
+    if (kind === 'archive' && !confirm(`Delete schedule "${schedule.name}"? The remote schedule is removed; history is retained in audit.`)) {
+      return;
+    }
+    if (kind === 'run' && !confirm(`Run schedule "${schedule.name}" now? This starts one execution without changing the cadence.`)) {
+      return;
+    }
+    actionMutation.mutate({ kind, id: schedule.id });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base">Schedules</CardTitle>
+          {canManage && suiteActive && (
+            <Button variant="secondary" size="sm" onClick={openCreate}>
+              <Plus className="h-3 w-3" aria-hidden />
+              New schedule
+            </Button>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {schedules.isLoading && (
+          <div className="space-y-2" aria-label="Loading schedules">
+            {[0, 1].map((i) => <Skeleton key={i} className="h-12" />)}
+          </div>
+        )}
+        {schedules.isError && (
+          <ErrorState error={schedules.error} onRetry={() => void schedules.refetch()} />
+        )}
+        {schedules.data && schedules.data.length === 0 && (
+          <p className="text-sm text-slate-500 text-center py-4">
+            No schedules yet. {canManage ? 'Create one to run this suite on a cron cadence.' : ''}
+          </p>
+        )}
+        {schedules.data && schedules.data.length > 0 && (
+          <div className="space-y-2">
+            {schedules.data.map((schedule) => (
+              <div key={schedule.id} className="p-3 border rounded-lg bg-slate-50 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId((current) => (current === schedule.id ? null : schedule.id))}
+                    className="font-medium text-sm text-brand-700 hover:text-brand-600 truncate"
+                    aria-expanded={expandedId === schedule.id}
+                  >
+                    {schedule.name}
+                  </button>
+                  <Badge tone={scheduleTone(schedule.status)}>{schedule.status}</Badge>
+                </div>
+                <div className="font-mono text-xs text-slate-600">
+                  {schedule.cronExpression} · {schedule.timeZoneId} · overlap {schedule.overlapPolicy}
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" aria-hidden />
+                    Last: {schedule.lastTriggeredAt ? new Date(schedule.lastTriggeredAt).toLocaleString() : 'never'}
+                  </span>
+                  {expandedId === schedule.id && (
+                    <span>
+                      Next:{' '}
+                      {scheduleDetails.isLoading
+                        ? 'loading…'
+                        : scheduleDetails.data?.nextRunAt
+                          ? new Date(scheduleDetails.data.nextRunAt).toLocaleString()
+                          : '—'}
+                    </span>
+                  )}
+                </div>
+                {canManage && (
+                  <div className="flex flex-wrap gap-1 pt-1">
+                    {schedule.status === 'Active' && (
+                      <>
+                        <Button variant="secondary" size="sm" onClick={() => handleAction('run', schedule)} aria-label={`Run schedule ${schedule.name} now`}>
+                          <Play className="h-3 w-3" aria-hidden />
+                          Run now
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleAction('pause', schedule)} aria-label={`Pause schedule ${schedule.name}`}>
+                          Pause
+                        </Button>
+                      </>
+                    )}
+                    {schedule.status === 'Disabled' && (
+                      <>
+                        <Button variant="secondary" size="sm" onClick={() => handleAction('run', schedule)} aria-label={`Run schedule ${schedule.name} now`}>
+                          <Play className="h-3 w-3" aria-hidden />
+                          Run now
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleAction('resume', schedule)} aria-label={`Resume schedule ${schedule.name}`}>
+                          Resume
+                        </Button>
+                      </>
+                    )}
+                    <Button variant="ghost" size="sm" onClick={() => openEdit(schedule)} aria-label={`Edit schedule ${schedule.name}`}>
+                      <Edit className="h-3 w-3" aria-hidden />
+                      Edit
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => handleAction('archive', schedule)} className="text-red-600 hover:text-red-700" aria-label={`Delete schedule ${schedule.name}`}>
+                      <Archive className="h-3 w-3" aria-hidden />
+                      Delete
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {showForm && canManage && (
+          <form onSubmit={handleSave} className="space-y-3 border-t pt-3">
+            <h3 className="text-sm font-medium text-slate-900">{editing ? 'Edit schedule' : 'New schedule'}</h3>
+            {formError && (
+              <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+                {formError}
+              </div>
+            )}
+            <div>
+              <label htmlFor="schedule-name" className="block text-xs font-medium text-slate-500">Name *</label>
+              <Input id="schedule-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nightly regression" maxLength={200} className="mt-1" />
+            </div>
+            <div>
+              <label htmlFor="schedule-cron" className="block text-xs font-medium text-slate-500">Cron expression *</label>
+              <Input
+                id="schedule-cron"
+                value={cron}
+                onChange={(e) => setCron(e.target.value)}
+                placeholder="30 2 * * *"
+                className="mt-1 font-mono"
+              />
+              <p className="mt-1 text-xs text-slate-400">5 fields (minute hour day month weekday), or 6 with leading seconds. Server-validated.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label htmlFor="schedule-tz" className="block text-xs font-medium text-slate-500">Timezone</label>
+                <Input
+                  id="schedule-tz"
+                  value={timeZone}
+                  onChange={(e) => setTimeZone(e.target.value)}
+                  placeholder="UTC"
+                  list="schedule-tz-suggestions"
+                  className="mt-1"
+                />
+                <datalist id="schedule-tz-suggestions">
+                  {TIMEZONE_SUGGESTIONS.map((tz) => (
+                    <option key={tz} value={tz} />
+                  ))}
+                </datalist>
+              </div>
+              <div>
+                <label htmlFor="schedule-overlap" className="block text-xs font-medium text-slate-500">Overlap</label>
+                <select
+                  id="schedule-overlap"
+                  value={overlap}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setOverlap(e.target.value)}
+                  className="mt-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 w-full"
+                >
+                  <option value="Skip">Skip overlapping</option>
+                  <option value="Allow">Allow overlapping</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setShowForm(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={saving}>
+                {saving ? 'Saving…' : editing ? 'Save changes' : 'Create schedule'}
+              </Button>
+            </div>
+          </form>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export function SuiteDetailPage() {
   const { projectId = '', suiteId } = useParams();
@@ -47,6 +384,7 @@ export function SuiteDetailPage() {
   const queryClient = useQueryClient();
   const profile = useProfile();
   const canManage = hasPermission(profile.data?.permissions, Permissions.TestCasesManage);
+  const canReadSchedules = hasPermission(profile.data?.permissions, Permissions.TestCasesRead);
   const canReadExecutions = hasPermission(profile.data?.permissions, Permissions.ExecutionsRead);
   const canReadReports = hasPermission(profile.data?.permissions, Permissions.ReportsRead);
 
@@ -71,18 +409,32 @@ export function SuiteDetailPage() {
   });
 
   const report = useQuery({
-    queryKey: suiteKeys.report(suiteId!, { from: reportFrom || undefined, to: reportTo || undefined }),
-    queryFn: () => suitesEndpoints.getReport(suiteId!, { from: reportFrom || undefined, to: reportTo || undefined }),
+    queryKey: suiteKeys.report(suiteId!, { from: reportFrom || undefined, to: reportTo || undefined, groupBy: 'day' }),
+    queryFn: () => suitesEndpoints.getReport(suiteId!, { from: reportFrom || undefined, to: reportTo || undefined, groupBy: 'day' }),
     enabled: !!suiteId && canReadReports,
     staleTime: 30_000,
   });
+
+  const trendOption = useMemo(() => {
+    const points = report.data?.trend ?? [];
+    return {
+      tooltip: { trigger: 'axis' as const },
+      legend: { data: ['Passed', 'Failed'] },
+      xAxis: { type: 'category' as const, data: points.map((p) => p.date) },
+      yAxis: { type: 'value' as const },
+      series: [
+        { name: 'Passed', type: 'bar' as const, data: points.map((p) => p.passed), itemStyle: { color: '#16a34a' } },
+        { name: 'Failed', type: 'bar' as const, data: points.map((p) => p.failed), itemStyle: { color: '#dc2626' } },
+      ],
+    };
+  }, [report.data]);
 
   const executeMutation = useMutation({
     mutationFn: (input: { projectId: string; suiteId: string; idempotencyKey?: string }) =>
       suitesEndpoints.execute(input),
     onSuccess: (result: ExecuteSuiteResult) => {
       queryClient.invalidateQueries({ queryKey: suiteKeys.executions(suiteId!, {}, 1) });
-      queryClient.invalidateQueries({ queryKey: suiteKeys.report(suiteId!, {}) });
+      queryClient.invalidateQueries({ queryKey: [...suiteKeys.all, 'report', suiteId!] });
       navigate(`/projects/${projectId}/executions/${result.executionId}`);
     },
     onError: (error: any) => {
@@ -234,6 +586,16 @@ export function SuiteDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {canReadSchedules && (
+            <SuiteSchedulesCard
+              projectId={projectId}
+              suiteId={suiteId!}
+              suiteActive={isActive}
+              canManage={canManage}
+              onError={setActionError}
+            />
+          )}
 
           {canReadExecutions && (
             <Card>
@@ -402,6 +764,37 @@ export function SuiteDetailPage() {
                         <p className="text-xs text-slate-600">Timeout/Error</p>
                       </div>
                     </div>
+                    {report.data.triggerBreakdown.length > 0 && (
+                      <div className="pt-2 border-t space-y-1">
+                        <p className="text-xs font-medium text-slate-500">By trigger</p>
+                        {report.data.triggerBreakdown.map((row) => (
+                          <div key={row.trigger} className="flex justify-between text-sm">
+                            <span className="text-slate-500">{TRIGGER_LABELS[row.trigger] ?? row.trigger}</span>
+                            <span className="font-mono text-slate-900">
+                              {row.total} exec · {row.passed} passed · {row.failed} failed
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {report.data.trend.length > 0 && (
+                      <div className="pt-2 border-t space-y-1">
+                        <p className="text-xs font-medium text-slate-500">Daily trend (UTC)</p>
+                        <Chart
+                          label="Daily suite execution trend"
+                          option={trendOption}
+                          fallback={(
+                            <ul className="text-sm text-slate-600 space-y-1">
+                              {report.data.trend.map((point) => (
+                                <li key={point.date}>
+                                  {point.date}: {point.total} executions, {point.passed} passed, {point.failed} failed
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        />
+                      </div>
+                    )}
                     <div className="pt-2 border-t">
                       <div className="flex justify-between text-sm">
                         <span className="text-slate-500">Total executions</span>

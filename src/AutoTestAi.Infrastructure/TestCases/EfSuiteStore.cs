@@ -212,7 +212,7 @@ public sealed class EfSuiteStore : ISuiteStore
         }).ToList();
     }
 
-    public async Task<SuiteReportDto?> GetReportDataAsync(Guid suiteId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct)
+    public async Task<SuiteReportDto?> GetReportDataAsync(Guid suiteId, DateTimeOffset? from, DateTimeOffset? to, TriggerType? trigger, CancellationToken ct)
     {
         var suiteName = await _db.TestSuites
             .Where(s => s.Id == suiteId)
@@ -224,6 +224,8 @@ public sealed class EfSuiteStore : ISuiteStore
         var query = _db.Executions
             .Where(e => e.SuiteId == suiteId)
             .Where(e => e.Status != ExecutionStatus.Queued && e.Status != ExecutionStatus.Running);
+        if (trigger.HasValue)
+            query = query.Where(e => e.TriggerType == trigger.Value);
         if (from.HasValue)
             query = query.Where(e => e.CreatedAt >= from.Value);
         if (to.HasValue)
@@ -276,7 +278,109 @@ public sealed class EfSuiteStore : ISuiteStore
             PassRate: totalTests > 0 ? (double)passed / totalTests * 100 : null,
             TotalDurationMs: stats?.TotalDurationMs ?? 0,
             AverageDurationMs: stats?.AverageDurationMs is null ? 0 : (long)stats.AverageDurationMs.Value,
-            LatestExecutionAt: latestExecutionAt);
+            LatestExecutionAt: latestExecutionAt,
+            TriggerBreakdown: Array.Empty<TriggerBreakdownItem>(),
+            Trend: Array.Empty<SuiteReportTrendPoint>());
+    }
+
+    public async Task<IReadOnlyList<TriggerBreakdownItem>> GetTriggerBreakdownAsync(Guid suiteId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct)
+    {
+        // One server-side grouped aggregate over the window.
+        var query = _db.Executions
+            .Where(e => e.SuiteId == suiteId)
+            .Where(e => e.Status != ExecutionStatus.Queued && e.Status != ExecutionStatus.Running);
+        if (from.HasValue)
+            query = query.Where(e => e.CreatedAt >= from.Value);
+        if (to.HasValue)
+            query = query.Where(e => e.CreatedAt <= to.Value);
+
+        var perTrigger = await query
+            .GroupBy(e => e.TriggerType)
+            .Select(g => new
+            {
+                Trigger = g.Key,
+                ExecutionIds = g.Select(e => e.Id).ToList(),
+            })
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        if (perTrigger.Count == 0)
+            return Array.Empty<TriggerBreakdownItem>();
+
+        var allIds = perTrigger.SelectMany(g => g.ExecutionIds).ToList();
+        var counts = await _db.ExecutionTests
+            .Where(t => allIds.Contains(t.ExecutionId))
+            .GroupBy(t => t.ExecutionId)
+            .Select(g => new
+            {
+                ExecutionId = g.Key,
+                Passed = g.Count(t => t.Status == ExecutionTestStatus.Passed),
+                Failed = g.Count(t => t.Status == ExecutionTestStatus.Failed),
+            })
+            .AsNoTracking()
+            .ToDictionaryAsync(x => x.ExecutionId, ct);
+
+        return perTrigger
+            .OrderBy(g => g.Trigger.ToString())
+            .Select(g =>
+            {
+                var passed = 0;
+                var failed = 0;
+                foreach (var id in g.ExecutionIds)
+                {
+                    if (counts.TryGetValue(id, out var c))
+                    {
+                        passed += c.Passed;
+                        failed += c.Failed;
+                    }
+                }
+                var total = passed + failed;
+                return new TriggerBreakdownItem(
+                    g.Trigger.ToString(),
+                    g.ExecutionIds.Count,
+                    passed,
+                    failed,
+                    total > 0 ? (double)passed / total * 100 : null);
+            })
+            .ToList();
+    }
+
+    public async Task<SuiteTrendData> GetTrendDataAsync(Guid suiteId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+    {
+        // Two bounded server queries; day bucketing happens client-side so no
+        // provider-specific date SQL and no per-day round-trips.
+        var executions = await _db.Executions
+            .Where(e => e.SuiteId == suiteId)
+            .Where(e => e.Status != ExecutionStatus.Queued && e.Status != ExecutionStatus.Running)
+            .Where(e => e.CreatedAt >= from && e.CreatedAt <= to)
+            .Select(e => new SuiteTrendExecution(e.Id, e.TriggerType.ToString(), e.CreatedAt))
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        if (executions.Count == 0)
+            return new SuiteTrendData(Array.Empty<SuiteTrendExecution>(), new Dictionary<Guid, SuiteTrendTests>());
+
+        var ids = executions.Select(e => e.ExecutionId).ToList();
+        var tests = await _db.ExecutionTests
+            .Where(t => ids.Contains(t.ExecutionId))
+            .GroupBy(t => t.ExecutionId)
+            .Select(g => new
+            {
+                ExecutionId = g.Key,
+                Passed = g.Count(t => t.Status == ExecutionTestStatus.Passed),
+                Failed = g.Count(t => t.Status == ExecutionTestStatus.Failed),
+                Cancelled = g.Count(t => t.Status == ExecutionTestStatus.Cancelled),
+                TimedOut = g.Count(t => t.Status == ExecutionTestStatus.TimedOut),
+                Error = g.Count(t => t.Status == ExecutionTestStatus.Error),
+                TotalDurationMs = g.Where(t => t.DurationMs.HasValue).Sum(t => (long)t.DurationMs!.Value),
+            })
+            .AsNoTracking()
+            .ToDictionaryAsync(
+                x => x.ExecutionId,
+                x => new SuiteTrendTests(x.Passed, x.Failed, x.Cancelled, x.TimedOut, x.Error, x.TotalDurationMs),
+                ct);
+
+        return new SuiteTrendData(executions, tests);
     }
 
     public async Task<Execution?> GetExecutionByIdempotencyKeyAsync(Guid projectId, string idempotencyKey, CancellationToken ct)

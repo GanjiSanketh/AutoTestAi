@@ -9,15 +9,17 @@ using System.Text.Json;
 namespace AutoTestAi.Application.TestCases;
 
 /// <summary>
-/// Suite management use cases (Phase 4 Slice 9A).
+/// Suite management use cases (Phase 4 Slices 9A/9B).
 /// Every method enforces server-side authorization through suite → project;
 /// the store performs no authorization checks. Suites are project-scoped:
 /// membership, execution history and reports never cross projects.
+/// Archiving a suite disables its active schedules (Slice 9B cascade).
 /// </summary>
 public sealed class SuiteService : ISuiteService
 {
     private readonly ISuiteStore _suites;
     private readonly ITestCaseStore _cases;
+    private readonly ISuiteScheduleService _schedules;
     private readonly ICurrentUserService _currentUser;
     private readonly IAuthorizationService _authorization;
     private readonly IUserDirectory _users;
@@ -27,6 +29,7 @@ public sealed class SuiteService : ISuiteService
     public SuiteService(
         ISuiteStore suites,
         ITestCaseStore cases,
+        ISuiteScheduleService schedules,
         ICurrentUserService currentUser,
         IAuthorizationService authorization,
         IUserDirectory users,
@@ -35,6 +38,7 @@ public sealed class SuiteService : ISuiteService
     {
         _suites = suites;
         _cases = cases;
+        _schedules = schedules;
         _currentUser = currentUser;
         _authorization = authorization;
         _users = users;
@@ -186,9 +190,13 @@ public sealed class SuiteService : ISuiteService
 
         await _suites.SaveChangesAsync(ct);
 
+        // Slice 9B: archiving disables active schedules so nothing fires for
+        // an archived suite. Schedules stay Disabled on reactivation.
+        var disabledSchedules = await _schedules.DisableForSuiteAsync(suiteId, ct);
+
         await _audit.RecordAsync("suite.archived", "test_suite",
             suite.Id.ToString(), suite.ProjectId,
-            JsonSerializer.Serialize(new { suiteId = suite.Id }),
+            JsonSerializer.Serialize(new { suiteId = suite.Id, disabledSchedules }),
             ct);
     }
 
@@ -316,7 +324,76 @@ public sealed class SuiteService : ISuiteService
             throw new ValidationException("Invalid report range.",
                 [new FieldError("from", "Report 'from' must not be after 'to'.")]);
 
-        return await _suites.GetReportDataAsync(suiteId, filters.From, filters.To, ct);
+        TriggerType? trigger = null;
+        if (!string.IsNullOrWhiteSpace(filters.Trigger))
+        {
+            if (Enum.TryParse<TriggerType>(filters.Trigger.Trim(), true, out var parsed))
+                trigger = parsed;
+            else
+                throw new ValidationException("Trigger filter is invalid.",
+                    [new FieldError("trigger", "Trigger must be 'Manual', 'Schedule' or 'Ci'.")]);
+        }
+
+        var groupedByDay = string.Equals(filters.GroupBy?.Trim(), "day", StringComparison.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(filters.GroupBy) && !groupedByDay)
+            throw new ValidationException("Group-by is invalid.",
+                [new FieldError("groupBy", "Group-by must be 'day'.")]);
+
+        var from = filters.From;
+        var to = filters.To;
+        if (groupedByDay)
+        {
+            // Bounded trend: default to the trailing 30 days, cap at 90.
+            to ??= _clock.UtcNow;
+            from ??= to.Value.AddDays(-30);
+            if ((to.Value - from.Value).TotalDays > 90)
+                throw new ValidationException("Report range is too large.",
+                    [new FieldError("to", "Trend reports support at most 90 days.")]);
+        }
+
+        var report = await _suites.GetReportDataAsync(suiteId, from, to, trigger, ct);
+        if (report is null)
+            return null;
+
+        var breakdown = await _suites.GetTriggerBreakdownAsync(suiteId, from, to, ct);
+        IReadOnlyList<SuiteReportTrendPoint> trend = Array.Empty<SuiteReportTrendPoint>();
+        if (groupedByDay)
+            trend = await BuildTrendAsync(suiteId, from!.Value, to!.Value, ct);
+
+        return report with { TriggerBreakdown = breakdown, Trend = trend };
+    }
+
+    private async Task<IReadOnlyList<SuiteReportTrendPoint>> BuildTrendAsync(
+        Guid suiteId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+    {
+        var data = await _suites.GetTrendDataAsync(suiteId, from, to, ct);
+
+        var buckets = new SortedDictionary<DateOnly, (int Executions, int Passed, int Failed, int Cancelled, int TimedOut, int Error, long Duration)>();
+        foreach (var execution in data.Executions)
+        {
+            if (!data.TestsByExecution.TryGetValue(execution.ExecutionId, out var tests))
+                continue;
+            var day = DateOnly.FromDateTime(execution.CreatedAt.UtcDateTime);
+            buckets.TryGetValue(day, out var bucket);
+            buckets[day] = (
+                bucket.Executions + 1,
+                bucket.Passed + tests.Passed,
+                bucket.Failed + tests.Failed,
+                bucket.Cancelled + tests.Cancelled,
+                bucket.TimedOut + tests.TimedOut,
+                bucket.Error + tests.Error,
+                bucket.Duration + tests.TotalDurationMs);
+        }
+
+        return buckets.Select(kv =>
+        {
+            var (day, b) = kv;
+            var testTotal = b.Passed + b.Failed + b.Cancelled + b.TimedOut + b.Error;
+            return new SuiteReportTrendPoint(
+                day, b.Executions, b.Passed, b.Failed, b.Cancelled, b.TimedOut, b.Error,
+                testTotal > 0 ? (double)b.Passed / testTotal * 100 : null,
+                b.Duration);
+        }).ToList();
     }
 
     // ---------- helpers ----------

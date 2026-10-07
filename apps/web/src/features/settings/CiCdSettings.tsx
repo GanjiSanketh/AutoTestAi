@@ -15,11 +15,10 @@ import {
   type CiIntegration,
 } from '../../lib/api/endpoints/cicd';
 import { projectsEndpoints } from '../../lib/api/endpoints/projects';
+import { suiteKeys, suitesEndpoints } from '../../lib/api/endpoints/suites';
 import { useProfile } from '../../lib/auth/useProfile';
 import { Permissions, hasPermission } from '../../lib/auth/permissions';
 import { useAppStore } from '../../stores/useAppStore';
-
-const GUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 function splitList(raw: string): string[] {
   return raw
@@ -135,6 +134,14 @@ export function CiCdSettings() {
     retry: false,
   });
 
+  const suites = useQuery({
+    queryKey: projectId ? suiteKeys.list(projectId, {}, 1) : [...suiteKeys.all, 'list', 'none'],
+    queryFn: () => suitesEndpoints.list(projectId!, {}, 1, 100),
+    enabled: !!projectId && canRead,
+    retry: false,
+    staleTime: 60_000,
+  });
+
   const deliveries = useQuery({
     queryKey: projectId ? ciCdKeys.deliveries(projectId, provider, 1) : [...ciCdKeys.all, 'deliveries', 'none'],
     queryFn: () => ciCdEndpoints.deliveries(projectId!, provider, 1, 25),
@@ -212,10 +219,6 @@ export function CiCdSettings() {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setSaved(null);
-    if (suiteId.trim() !== '' && !GUID_PATTERN.test(suiteId.trim())) {
-      setFormError('Default suite must be a valid suite ID (GUID) or left empty.');
-      return;
-    }
     if (provider === 'azure' && enabled && username.trim() === '' && (current?.username ?? '') === '') {
       setFormError('Azure service hooks require a username for Basic authentication.');
       return;
@@ -391,15 +394,35 @@ export function CiCdSettings() {
 
                 <div>
                   <label htmlFor="cicd-suite" className={labelClass}>
-                    Default suite ID (required for execution)
+                    Default suite (required for execution)
                   </label>
-                  <input
+                  <select
                     id="cicd-suite"
                     value={suiteId}
                     onChange={(e) => setSuiteId(e.target.value)}
-                    placeholder="Suite GUID — deliveries fan out across its approved members"
                     className={inputClass}
-                  />
+                    disabled={suites.isLoading}
+                  >
+                    <option value="">Select a suite</option>
+                    {(suites.data?.items ?? []).map((suite) => (
+                      <option key={suite.id} value={suite.id}>
+                        {suite.name} ({suite.testCount} tests)
+                      </option>
+                    ))}
+                  </select>
+                  {suites.isLoading && (
+                    <p className="mt-1 text-xs text-slate-400">Loading suites…</p>
+                  )}
+                  {suites.isError && (
+                    <p className="mt-1 text-xs text-red-600">
+                      Could not load suites. Deliveries fan out across the selected suite&apos;s approved members.
+                    </p>
+                  )}
+                  {suites.data && suites.data.items.length === 0 && !suites.isLoading && (
+                    <p className="mt-1 text-xs text-slate-400">
+                      This project has no test suites yet. Create one before enabling execution.
+                    </p>
+                  )}
                 </div>
 
                 <div>

@@ -126,13 +126,14 @@ internal sealed class FakeSuiteStore : ISuiteStore
                 Tests.Count(t => t.ExecutionId == e.Id && t.Status == ExecutionTestStatus.Failed)))
             .ToList());
 
-    public Task<SuiteReportDto?> GetReportDataAsync(Guid suiteId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct)
+    public Task<SuiteReportDto?> GetReportDataAsync(Guid suiteId, DateTimeOffset? from, DateTimeOffset? to, TriggerType? trigger, CancellationToken ct)
     {
         var suite = Suites.FirstOrDefault(s => s.Id == suiteId);
         if (suite is null)
             return Task.FromResult<SuiteReportDto?>(null);
         var query = Executions
             .Where(e => e.SuiteId == suiteId && e.Status != ExecutionStatus.Queued && e.Status != ExecutionStatus.Running);
+        if (trigger.HasValue) query = query.Where(e => e.TriggerType == trigger.Value);
         if (from.HasValue) query = query.Where(e => e.CreatedAt >= from.Value);
         if (to.HasValue) query = query.Where(e => e.CreatedAt <= to.Value);
         var ids = query.Select(e => e.Id).ToList();
@@ -148,7 +149,54 @@ internal sealed class FakeSuiteStore : ISuiteStore
         return Task.FromResult<SuiteReportDto?>(new SuiteReportDto(
             suiteId, suite.Name, ids.Count, passed, failed, cancelled, timedOut, error,
             total > 0 ? (double)passed / total * 100 : null, 0, 0,
-            Executions.Where(e => e.SuiteId == suiteId).Max(e => (DateTimeOffset?)e.CreatedAt)));
+            Executions.Where(e => e.SuiteId == suiteId).Max(e => (DateTimeOffset?)e.CreatedAt),
+            Array.Empty<TriggerBreakdownItem>(),
+            Array.Empty<SuiteReportTrendPoint>()));
+    }
+
+    public Task<IReadOnlyList<TriggerBreakdownItem>> GetTriggerBreakdownAsync(Guid suiteId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct)
+    {
+        var query = Executions
+            .Where(e => e.SuiteId == suiteId && e.Status != ExecutionStatus.Queued && e.Status != ExecutionStatus.Running);
+        if (from.HasValue) query = query.Where(e => e.CreatedAt >= from.Value);
+        if (to.HasValue) query = query.Where(e => e.CreatedAt <= to.Value);
+        return Task.FromResult<IReadOnlyList<TriggerBreakdownItem>>(query
+            .GroupBy(e => e.TriggerType)
+            .OrderBy(g => g.Key.ToString())
+            .Select(g =>
+            {
+                var tests = Tests.Where(t => g.Select(e => e.Id).Contains(t.ExecutionId)).ToList();
+                var passed = tests.Count(t => t.Status == ExecutionTestStatus.Passed);
+                var failed = tests.Count(t => t.Status == ExecutionTestStatus.Failed);
+                var total = passed + failed;
+                return new TriggerBreakdownItem(
+                    g.Key.ToString(), g.Count(), passed, failed,
+                    total > 0 ? (double)passed / total * 100 : null);
+            })
+            .ToList());
+    }
+
+    public Task<SuiteTrendData> GetTrendDataAsync(Guid suiteId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+    {
+        var executions = Executions
+            .Where(e => e.SuiteId == suiteId && e.Status != ExecutionStatus.Queued && e.Status != ExecutionStatus.Running)
+            .Where(e => e.CreatedAt >= from && e.CreatedAt <= to)
+            .Select(e => new SuiteTrendExecution(e.Id, e.TriggerType.ToString(), e.CreatedAt))
+            .ToList();
+        var ids = executions.Select(e => e.ExecutionId).ToList();
+        var tests = Tests
+            .Where(t => ids.Contains(t.ExecutionId))
+            .GroupBy(t => t.ExecutionId)
+            .ToDictionary(
+                g => g.Key,
+                g => new SuiteTrendTests(
+                    g.Count(t => t.Status == ExecutionTestStatus.Passed),
+                    g.Count(t => t.Status == ExecutionTestStatus.Failed),
+                    g.Count(t => t.Status == ExecutionTestStatus.Cancelled),
+                    g.Count(t => t.Status == ExecutionTestStatus.TimedOut),
+                    g.Count(t => t.Status == ExecutionTestStatus.Error),
+                    g.Where(t => t.DurationMs.HasValue).Sum(t => (long)t.DurationMs!.Value)));
+        return Task.FromResult(new SuiteTrendData(executions, tests));
     }
 
     public Task<Execution?> GetExecutionByIdempotencyKeyAsync(Guid projectId, string idempotencyKey, CancellationToken ct)
@@ -190,7 +238,27 @@ public sealed class SuiteServiceTests
     private static readonly Guid ProjectA = Guid.NewGuid();
     private static readonly Guid ProjectB = Guid.NewGuid();
 
-    private static (SuiteService Service, FakeSuiteStore Suites, FakeTestCaseStore Cases, StubAuditProjectStore Audits) Create(
+    /// <summary>No-op schedule service for 9A suite tests (records archive cascades).</summary>
+    internal sealed class StubScheduleService : ISuiteScheduleService
+    {
+        public readonly List<Guid> DisabledSuites = new();
+        public Task<SuiteScheduleDto> CreateAsync(Guid p, Guid s, CreateSuiteScheduleCommand c, CancellationToken ct) => throw new NotImplementedException();
+        public Task<IReadOnlyList<SuiteScheduleDto>> ListBySuiteAsync(Guid p, Guid s, CancellationToken ct) => throw new NotImplementedException();
+        public Task<SuiteScheduleDto?> GetByIdAsync(Guid id, CancellationToken ct) => throw new NotImplementedException();
+        public Task<SuiteScheduleDto?> UpdateAsync(Guid id, UpdateSuiteScheduleCommand c, CancellationToken ct) => throw new NotImplementedException();
+        public Task PauseAsync(Guid id, CancellationToken ct) => throw new NotImplementedException();
+        public Task ResumeAsync(Guid id, CancellationToken ct) => throw new NotImplementedException();
+        public Task ArchiveAsync(Guid id, CancellationToken ct) => throw new NotImplementedException();
+        public Task<ExecuteSuiteResult> RunNowAsync(Guid id, RunScheduleNowCommand c, CancellationToken ct) => throw new NotImplementedException();
+        public Task<int> DisableForSuiteAsync(Guid suiteId, CancellationToken ct)
+        {
+            DisabledSuites.Add(suiteId);
+            return Task.FromResult(0);
+        }
+        public Task<ExecuteSuiteResult> FireAsync(Guid id, string key, CancellationToken ct) => throw new NotImplementedException();
+    }
+
+    private static (SuiteService Service, FakeSuiteStore Suites, FakeTestCaseStore Cases, StubAuditProjectStore Audits, StubScheduleService Schedules) Create(
         StubCurrentUser user,
         Action<FakeSuiteStore, FakeTestCaseStore, StubMembershipStore>? seed = null,
         string userSub = "user-1",
@@ -204,11 +272,12 @@ public sealed class SuiteServiceTests
         if (userAppId.HasValue) directory.Add(userSub, userAppId.Value);
         var authorization = new AuthorizationService(user, memberships);
         var audits = new StubAuditProjectStore();
+        var schedules = new StubScheduleService();
         var service = new SuiteService(
-            suites, cases, user, authorization, directory,
+            suites, cases, schedules, user, authorization, directory,
             new SystemDateTimeProvider(),
             new AuditService(audits, user, directory, NullLogger<AuditService>.Instance));
-        return (service, suites, cases, audits);
+        return (service, suites, cases, audits, schedules);
     }
 
     private static StubCurrentUser Manager(string sub = "user-1") => new()
@@ -272,7 +341,7 @@ public sealed class SuiteServiceTests
     public async Task Create_Succeeds_AndAudits_WithCreator()
     {
         var appId = Guid.NewGuid();
-        var (service, suites, _, audits) = Create(Manager(),
+        var (service, suites, _, audits, _) = Create(Manager(),
             (s, c, m) => m.Add("user-1", ProjectA), userAppId: appId);
 
         var created = await service.CreateAsync(
@@ -288,7 +357,7 @@ public sealed class SuiteServiceTests
     [Fact]
     public async Task Create_DuplicateNameSameProject_Conflict_CaseInsensitive()
     {
-        var (service, _, _, _) = Create(Manager(), (s, c, m) =>
+        var (service, _, _, _, _) = Create(Manager(), (s, c, m) =>
         {
             m.Add("user-1", ProjectA);
             SeedSuite(s, ProjectA, "Regression");
@@ -301,7 +370,7 @@ public sealed class SuiteServiceTests
     [Fact]
     public async Task Create_SameNameDifferentProject_Allowed()
     {
-        var (service, suites, _, _) = Create(Manager(), (s, c, m) =>
+        var (service, suites, _, _, _) = Create(Manager(), (s, c, m) =>
         {
             m.Add("user-1", ProjectA);
             m.Add("user-1", ProjectB);
@@ -317,7 +386,7 @@ public sealed class SuiteServiceTests
     [Fact]
     public async Task Create_Validation_NameRequired_And_BadStatus()
     {
-        var (service, _, _, _) = Create(Manager(), (s, c, m) => m.Add("user-1", ProjectA));
+        var (service, _, _, _, _) = Create(Manager(), (s, c, m) => m.Add("user-1", ProjectA));
 
         await Assert.ThrowsAsync<ValidationException>(() => service.CreateAsync(
             new CreateSuiteCommand(ProjectA, "  ", null, null, null), CancellationToken.None));
@@ -329,7 +398,7 @@ public sealed class SuiteServiceTests
     public async Task Create_MemberCrossProject_Forbidden_MemberMissing_NotFound()
     {
         TestCase? foreign = null;
-        var (service, _, _, _) = Create(Manager(), (s, c, m) =>
+        var (service, _, _, _, _) = Create(Manager(), (s, c, m) =>
         {
             m.Add("user-1", ProjectA);
             m.Add("user-1", ProjectB);
@@ -353,7 +422,7 @@ public sealed class SuiteServiceTests
     public async Task Create_Unauthorized_ThrowsForbidden()
     {
         // Viewer (no testcases.manage) cannot create.
-        var (service, _, _, _) = Create(Viewer(), (s, c, m) => m.Add("user-1", ProjectA));
+        var (service, _, _, _, _) = Create(Viewer(), (s, c, m) => m.Add("user-1", ProjectA));
 
         await Assert.ThrowsAsync<ForbiddenException>(() => service.CreateAsync(
             new CreateSuiteCommand(ProjectA, "S", null, null, null), CancellationToken.None));
@@ -363,7 +432,7 @@ public sealed class SuiteServiceTests
     public async Task Create_DuplicateMember_Validation()
     {
         TestCase? member = null;
-        var (service, _, _, _) = Create(Manager(), (s, c, m) =>
+        var (service, _, _, _, _) = Create(Manager(), (s, c, m) =>
         {
             m.Add("user-1", ProjectA);
             member = SeedCase(c, ProjectA, "A-001");
@@ -381,7 +450,7 @@ public sealed class SuiteServiceTests
     public async Task GetById_NonMember_Forbidden_NoLeak()
     {
         TestSuite? suite = null;
-        var (service, _, _, _) = Create(Viewer(), (s, c, m) =>
+        var (service, _, _, _, _) = Create(Viewer(), (s, c, m) =>
         {
             // Viewer is a member of ProjectB only; suite lives in ProjectA.
             m.Add("user-1", ProjectB);
@@ -396,17 +465,17 @@ public sealed class SuiteServiceTests
     {
         // Slice-1 opaque-scope convention: unknown ids authorize against the
         // id itself, so non-admins get 403 (no existence leak); admins get 404.
-        var (memberService, _, _, _) = Create(Manager(), (s, c, m) => m.Add("user-1", ProjectA));
+        var (memberService, _, _, _, _) = Create(Manager(), (s, c, m) => m.Add("user-1", ProjectA));
         await Assert.ThrowsAsync<ForbiddenException>(() => memberService.GetByIdAsync(Guid.NewGuid(), CancellationToken.None));
 
-        var (adminService, _, _, _) = Create(Admin(), null);
+        var (adminService, _, _, _, _) = Create(Admin(), null);
         await Assert.ThrowsAsync<NotFoundException>(() => adminService.GetByIdAsync(Guid.NewGuid(), CancellationToken.None));
     }
 
     [Fact]
     public async Task List_NonMember_Forbidden()
     {
-        var (service, _, _, _) = Create(Viewer(), (_, _, _) => { });
+        var (service, _, _, _, _) = Create(Viewer(), (_, _, _) => { });
 
         await Assert.ThrowsAsync<ForbiddenException>(() => service.ListAsync(
             ProjectA, new SuiteListFilters(null, null), 1, 25, CancellationToken.None));
@@ -418,7 +487,7 @@ public sealed class SuiteServiceTests
     public async Task Update_DuplicateName_Conflict_AndAudits()
     {
         TestSuite? target = null;
-        var (service, _, _, audits) = Create(Manager(), (s, c, m) =>
+        var (service, _, _, audits, _) = Create(Manager(), (s, c, m) =>
         {
             m.Add("user-1", ProjectA);
             SeedSuite(s, ProjectA, "Taken");
@@ -438,7 +507,7 @@ public sealed class SuiteServiceTests
     public async Task Archive_SetsArchived_AndAudits()
     {
         TestSuite? suite = null;
-        var (service, suites, _, audits) = Create(Manager(), (s, c, m) =>
+        var (service, suites, _, audits, schedules) = Create(Manager(), (s, c, m) =>
         {
             m.Add("user-1", ProjectA);
             suite = SeedSuite(s, ProjectA, "Mine");
@@ -448,6 +517,7 @@ public sealed class SuiteServiceTests
 
         Assert.Equal(ProjectStatus.Archived, suites.Suites.Single().Status);
         Assert.Contains(audits.Audits, a => a.Action == "suite.archived");
+        Assert.Contains(suite.Id, schedules.DisabledSuites);
     }
 
     // ---------- membership ----------
@@ -458,7 +528,7 @@ public sealed class SuiteServiceTests
         TestSuite? suite = null;
         TestCase? mine = null;
         TestCase? foreign = null;
-        var (service, _, _, _) = Create(Manager(), (s, c, m) =>
+        var (service, _, _, _, _) = Create(Manager(), (s, c, m) =>
         {
             m.Add("user-1", ProjectA);
             m.Add("user-1", ProjectB);
@@ -482,7 +552,7 @@ public sealed class SuiteServiceTests
     {
         TestSuite? suite = null;
         TestCase? mine = null;
-        var (service, _, _, _) = Create(Manager(), (s, c, m) =>
+        var (service, _, _, _, _) = Create(Manager(), (s, c, m) =>
         {
             m.Add("user-1", ProjectA);
             suite = SeedSuite(s, ProjectA, "S", ProjectStatus.Archived);
@@ -498,7 +568,7 @@ public sealed class SuiteServiceTests
     {
         TestSuite? suite = null;
         TestCase? mine = null;
-        var (service, _, _, audits) = Create(Manager(), (s, c, m) =>
+        var (service, _, _, audits, _) = Create(Manager(), (s, c, m) =>
         {
             m.Add("user-1", ProjectA);
             suite = SeedSuite(s, ProjectA, "S");
@@ -521,7 +591,7 @@ public sealed class SuiteServiceTests
         TestSuite? suite = null;
         TestCase? a = null;
         TestCase? b = null;
-        var (service, suites, _, audits) = Create(Manager(), (s, c, m) =>
+        var (service, suites, _, audits, _) = Create(Manager(), (s, c, m) =>
         {
             m.Add("user-1", ProjectA);
             suite = SeedSuite(s, ProjectA, "S");
@@ -566,7 +636,7 @@ public sealed class SuiteServiceTests
     public async Task History_AggregatesCounts_And_FiltersStatus()
     {
         TestSuite? suite = null;
-        var (service, suites, _, _) = Create(Manager(), (s, c, m) =>
+        var (service, suites, _, _, _) = Create(Manager(), (s, c, m) =>
         {
             m.Add("user-1", ProjectA);
             suite = SeedSuite(s, ProjectA, "S");
@@ -607,7 +677,7 @@ public sealed class SuiteServiceTests
     public async Task Report_Aggregates_And_RespectsDateRange()
     {
         TestSuite? suite = null;
-        var (service, suites, _, _) = Create(Manager(), (s, c, m) =>
+        var (service, suites, _, _, _) = Create(Manager(), (s, c, m) =>
         {
             m.Add("user-1", ProjectA);
             suite = SeedSuite(s, ProjectA, "S");
@@ -651,7 +721,7 @@ public sealed class SuiteServiceTests
     [Fact]
     public async Task History_UnknownSuite_Admin_NotFound_Report_UnknownSuite_Admin_NotFound()
     {
-        var (service, _, _, _) = Create(Admin(), null);
+        var (service, _, _, _, _) = Create(Admin(), null);
 
         await Assert.ThrowsAsync<NotFoundException>(() => service.GetExecutionHistoryAsync(
             Guid.NewGuid(), new SuiteExecutionHistoryFilters(null, null), 1, 25, CancellationToken.None));

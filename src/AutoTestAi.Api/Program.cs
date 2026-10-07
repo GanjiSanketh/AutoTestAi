@@ -227,6 +227,7 @@ app.MapAuthEndpoints();
 app.MapProjectEndpoints();
 app.MapTestCaseEndpoints();
 app.MapSuiteEndpoints();
+app.MapSuiteScheduleEndpoints();
 app.MapJiraChangeCheckEndpoints();
 app.MapTestGenerationEndpoints();
 app.MapStoryTestGenerationEndpoints();

@@ -41,8 +41,12 @@ public sealed class UnavailableSuiteStore : ISuiteStore
     public Task<IReadOnlyList<SuiteExecutionSummaryDto>> GetExecutionHistoryAsync(
         Guid suiteId, ExecutionStatus? status, TriggerType? triggerType, int skip, int take, CancellationToken ct)
         => Unavailable<IReadOnlyList<SuiteExecutionSummaryDto>>();
-    public Task<SuiteReportDto?> GetReportDataAsync(Guid suiteId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct)
+    public Task<SuiteReportDto?> GetReportDataAsync(Guid suiteId, DateTimeOffset? from, DateTimeOffset? to, TriggerType? trigger, CancellationToken ct)
         => Unavailable<SuiteReportDto?>();
+    public Task<IReadOnlyList<TriggerBreakdownItem>> GetTriggerBreakdownAsync(Guid suiteId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct)
+        => Unavailable<IReadOnlyList<TriggerBreakdownItem>>();
+    public Task<SuiteTrendData> GetTrendDataAsync(Guid suiteId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+        => Unavailable<SuiteTrendData>();
     public Task<Execution?> GetExecutionByIdempotencyKeyAsync(Guid projectId, string idempotencyKey, CancellationToken ct)
         => Unavailable<Execution?>();
 }

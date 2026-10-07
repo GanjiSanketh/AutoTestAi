@@ -5,6 +5,7 @@ using System.Text.Json;
 using AutoTestAi.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -13,9 +14,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AutoTestAi.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AutoTestAiDbContext))]
-    partial class AutoTestAiDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261007123821_Slice9B_SuiteSchedules")]
+    partial class Slice9B_SuiteSchedules
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

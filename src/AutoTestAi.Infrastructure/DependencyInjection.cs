@@ -63,6 +63,7 @@ public static class DependencyInjection
             services.AddScoped<IExecutionVariablesStore, EfExecutionVariablesStore>();
             services.AddScoped<ITestSuiteLookup, EfTestSuiteLookup>();
             services.AddScoped<Application.TestCases.ISuiteStore, TestCases.EfSuiteStore>();
+            services.AddScoped<Application.TestCases.ISuiteScheduleStore, TestCases.EfSuiteScheduleStore>();
             services.AddScoped<Application.Webhooks.IWebhookDeliveryStore, Webhooks.EfWebhookDeliveryStore>();
             services.AddScoped<Application.Webhooks.ISuiteMemberLookup, Webhooks.EfSuiteMemberLookup>();
             services.AddScoped<Application.Mobile.IMobileRegistryStore, Mobile.EfMobileRegistryStore>();
@@ -98,6 +99,7 @@ public static class DependencyInjection
             services.AddSingleton<IExecutionVariablesStore, Variables.UnavailableExecutionVariablesStore>();
             services.AddSingleton<ITestSuiteLookup, Variables.UnavailableTestSuiteLookup>();
             services.AddSingleton<Application.TestCases.ISuiteStore, TestCases.UnavailableSuiteStore>();
+            services.AddSingleton<Application.TestCases.ISuiteScheduleStore, TestCases.UnavailableSuiteScheduleStore>();
             services.AddSingleton<Application.Webhooks.IWebhookDeliveryStore, Webhooks.UnavailableWebhookDeliveryStore>();
             services.AddSingleton<Application.Webhooks.ISuiteMemberLookup, Webhooks.UnavailableSuiteMemberLookup>();
             services.AddSingleton<Application.Mobile.IMobileRegistryStore, Mobile.UnavailableMobileRegistryStore>();

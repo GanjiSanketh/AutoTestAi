@@ -155,11 +155,13 @@ public static class SuiteEndpoints
             .WithName("GetSuiteExecutionHistory")
             .WithSummary("Get execution history for the suite.");
 
-        // Suite report
+        // Suite report (Slice 9B: optional trigger filter + daily trend)
         suites.MapGet("/{suiteId:guid}/report", async (
                 Guid suiteId,
                 string? from,
                 string? to,
+                string? trigger,
+                string? groupBy,
                 ISuiteService service,
                 CancellationToken ct) =>
             {
@@ -181,11 +183,11 @@ public static class SuiteEndpoints
                 }
 
                 var result = await service.GetReportAsync(suiteId,
-                    new SuiteReportFilters(fromDate, toDate), ct);
+                    new SuiteReportFilters(fromDate, toDate, trigger, groupBy), ct);
                 return result is not null ? Results.Ok(result) : Results.NotFound();
             })
             .WithName("GetSuiteReport")
-            .WithSummary("Get a basic execution report for the suite.");
+            .WithSummary("Get a suite execution report with trigger breakdown and optional daily trend.");
 
         return app;
     }

@@ -10,6 +10,28 @@ public enum ProjectStatus
     Archived = 1
 }
 
+/// <summary>
+/// Lifecycle of a test suite schedule (Phase 4 Slice 9B).
+/// Active = Temporal schedule present and unpaused; Disabled = present but
+/// paused; Archived = remote schedule removed, row retained for audit.
+/// </summary>
+public enum ScheduleStatus
+{
+    Active = 0,
+    Disabled = 1,
+    Archived = 2
+}
+
+/// <summary>
+/// Overlap behavior when a schedule fires while its own previous action is
+/// still running (Phase 4 Slice 9B). Maps to Temporal schedule overlap.
+/// </summary>
+public enum ScheduleOverlapPolicy
+{
+    Skip = 0,
+    Allow = 1
+}
+
 public enum TestCaseStatus
 {
     Draft = 0,

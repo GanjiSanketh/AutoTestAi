@@ -160,6 +160,8 @@ public class Slice1ApiFactory : WebApplicationFactory<Program>
             services.AddScoped<ITestCaseStore, EfTestCaseStore>();
             services.RemoveAll<ISuiteStore>();
             services.AddScoped<ISuiteStore, EfSuiteStore>();
+            services.RemoveAll<ISuiteScheduleStore>();
+            services.AddScoped<ISuiteScheduleStore, EfSuiteScheduleStore>();
             services.RemoveAll<IExecutionStore>();
             services.AddScoped<IExecutionStore, EfExecutionStore>();
             services.RemoveAll<IDefectStore>();
