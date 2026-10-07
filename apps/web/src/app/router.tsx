@@ -12,6 +12,9 @@ import { TestCaseNewPage } from '../features/test-cases/TestCaseNewPage';
 import { TestCaseDetailsPage } from '../features/test-cases/TestCaseDetailsPage';
 import { TestCaseEditPage } from '../features/test-cases/TestCaseEditPage';
 import { JiraStaleTestsPage } from '../features/test-cases/JiraStaleTestsPage';
+import { SuiteListPage } from '../features/test-cases/SuiteListPage';
+import { SuiteFormPage } from '../features/test-cases/SuiteFormPage';
+import { SuiteDetailPage } from '../features/test-cases/SuiteDetailPage';
 import { ProjectsPage } from '../features/projects/ProjectsPage';
 import { ProjectNewPage } from '../features/projects/ProjectNewPage';
 import { ProjectDetailsPage } from '../features/projects/ProjectDetailsPage';
@@ -56,6 +59,10 @@ export const router = createBrowserRouter([
           { path: 'projects/:projectId/test-cases/new', element: <TestCaseNewPage /> },
           { path: 'projects/:projectId/test-cases/:testCaseId', element: <TestCaseDetailsPage /> },
           { path: 'projects/:projectId/test-cases/:testCaseId/edit', element: <TestCaseEditPage /> },
+          { path: 'projects/:projectId/test-suites', element: <SuiteListPage /> },
+          { path: 'projects/:projectId/test-suites/new', element: <SuiteFormPage /> },
+          { path: 'projects/:projectId/test-suites/:suiteId', element: <SuiteDetailPage /> },
+          { path: 'projects/:projectId/test-suites/:suiteId/edit', element: <SuiteFormPage /> },
           { path: 'projects', element: <ProjectsPage /> },
           { path: 'projects/new', element: <ProjectNewPage /> },
           { path: 'projects/:projectId', element: <ProjectDetailsPage /> },

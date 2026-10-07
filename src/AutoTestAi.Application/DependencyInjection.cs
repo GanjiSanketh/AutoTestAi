@@ -28,6 +28,7 @@ public static class DependencyInjection
         services.AddSingleton<IAiTestGenerationPromptBuilder, AiTestGenerationPromptBuilder>();
         services.AddSingleton<IAiStoryTestPromptBuilder, AiStoryTestPromptBuilder>();
         services.AddSingleton<IAiFailureAnalysisPromptBuilder, AiFailureAnalysisPromptBuilder>();
+        services.AddSingleton<SelfHealing.SelfHealingAiPromptBuilder>();
         services.AddSingleton<AiGenerationValidator>();
         services.AddSingleton<AiAnalysisValidator>();
         services.AddSingleton<SelfHealing.SelfHealingAiPromptBuilder>();
@@ -36,6 +37,8 @@ public static class DependencyInjection
         services.AddScoped<IExecutionSubscriptionAuthorizer, ExecutionSubscriptionAuthorizer>();
         services.AddScoped<IProjectService, ProjectService>();
         services.AddScoped<ITestCaseService, TestCaseService>();
+        services.AddScoped<TestCases.ISuiteService, TestCases.SuiteService>();
+        services.AddScoped<TestCases.ISuiteExecutionService, TestCases.SuiteExecutionService>();
         services.AddScoped<TestCases.IJiraChangeCheckService, TestCases.JiraChangeCheckService>();
         services.AddScoped<ITestExecutionService, TestExecutionService>();
         services.AddScoped<IExecutionEngine, ExecutionEngine>();
@@ -78,6 +81,6 @@ public static class DependencyInjection
         services.AddSingleton<JiraStoryImportRateLimiter>();
         services.AddScoped<IJiraStoryImportService, JiraStoryImportService>();
         services.AddScoped<IAuditService, AuditService>();
-        return services;
+return services;
     }
 }
