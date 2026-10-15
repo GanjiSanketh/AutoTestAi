@@ -176,6 +176,12 @@ public interface IMaintenanceStore
 public interface IMaintenanceService
 {
     Task<MaintenanceScanResult> ScanAsync(Guid projectId, CancellationToken ct);
+    /// <summary>
+    /// System-initiated scan sharing the manual scan core (Slice 10). No
+    /// authorization — the Temporal activity validates schedule/project
+    /// ownership before invoking. Only callable server-side.
+    /// </summary>
+    Task<MaintenanceScanResult> ScanAsSystemAsync(Guid projectId, CancellationToken ct);
     Task<PagedResult<MaintenanceProposalDto>> ListAsync(
         Guid projectId, MaintenanceProposalFilters filters,
         int page, int pageSize, CancellationToken ct);

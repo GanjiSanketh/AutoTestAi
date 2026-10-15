@@ -35,3 +35,23 @@ public sealed class MaintenanceProposal : EntityBase
     public Guid? CreatedVersionId { get; set; }
     public uint RowVersion { get; set; }
 }
+
+/// <summary>
+/// Recurring cadence for the deterministic maintenance scan (Phase 4 Slice
+/// 10). Exactly one row per project (UNIQUE(ProjectId)). Temporal owns
+/// firing/next-run; this row owns cadence config, lifecycle, and last-run
+/// pointers. Scheduled scans only create Proposed rows through the existing
+/// detector — approval/application stay human-gated. Never carries secrets,
+/// credentials, or proposal contents.
+/// </summary>
+public sealed class MaintenanceScanSchedule : EntityBase
+{
+    public Guid ProjectId { get; set; }
+    public string CronExpression { get; set; } = string.Empty;
+    public string TimeZoneId { get; set; } = "UTC";
+    public ScheduleStatus Status { get; set; } = ScheduleStatus.Active;
+    public DateTimeOffset? LastTriggeredAt { get; set; }
+    public int? LastCandidatesDetected { get; set; }
+    public int? LastProposalsCreated { get; set; }
+    public Guid? CreatedBy { get; set; }
+}

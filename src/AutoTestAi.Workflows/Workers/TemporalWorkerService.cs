@@ -47,8 +47,10 @@ public sealed class TemporalWorkerService : BackgroundService
                 new TemporalWorkerOptions(_options.TaskQueue)
                     .AddWorkflow<TestExecutionWorkflow>()
                     .AddWorkflow<SuiteScheduleWorkflow>()
+                    .AddWorkflow<MaintenanceScanWorkflow>()
                     .AddAllActivities(new TestExecutionActivities(_scopes))
-                    .AddAllActivities(new SuiteScheduleActivities(_scopes)));
+                    .AddAllActivities(new SuiteScheduleActivities(_scopes))
+                    .AddAllActivities(new MaintenanceScanActivities(_scopes)));
             _logger.LogInformation(
                 "Temporal worker listening on queue {TaskQueue} (namespace {Namespace}).",
                 _options.TaskQueue, _options.Namespace);

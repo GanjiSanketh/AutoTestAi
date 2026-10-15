@@ -897,6 +897,55 @@ namespace AutoTestAi.Infrastructure.Persistence.Migrations
                     b.ToTable("maintenance_proposals", (string)null);
                 });
 
+            modelBuilder.Entity("AutoTestAi.Domain.Entities.MaintenanceScanSchedule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CronExpression")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int?>("LastCandidatesDetected")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("LastProposalsCreated")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("LastTriggeredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TimeZoneId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId")
+                        .IsUnique();
+
+                    b.ToTable("maintenance_scan_schedules", (string)null);
+                });
+
             modelBuilder.Entity("AutoTestAi.Domain.Entities.MobileApp", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2094,6 +2143,15 @@ namespace AutoTestAi.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("IX_webhook_deliveries_Integration_Delivery");
 
                     b.ToTable("webhook_deliveries", (string)null);
+                });
+
+            modelBuilder.Entity("AutoTestAi.Domain.Entities.MaintenanceScanSchedule", b =>
+                {
+                    b.HasOne("AutoTestAi.Domain.Entities.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("AutoTestAi.Domain.Entities.MobileDevice", b =>

@@ -65,6 +65,9 @@ users/projects → audit_events
 ### test_suite_schedules (Slice 9B)
 `id UUID PK`, `project_id FK` (Restrict), `suite_id FK` → `test_suites` (Restrict), `name`, `cron_expression`, `time_zone_id` (IANA, default `UTC`), `status` (`Active`/`Disabled`/`Archived`), `overlap_policy` (`Skip`/`Allow`), `last_triggered_at NULL`, `last_execution_id NULL`, `created_by`, timestamps; indexes `(project_id)`, `(suite_id)`; unique `(project_id, lower(name))` expression index (service layer enforces the same rule). Temporal owns firing/next-run — `next_run_at` is deliberately NOT persisted. No secret/credential columns.
 
+### maintenance_scan_schedules (Phase 4 Slice 10)
+`id UUID PK`, `project_id FK` → `projects` (Restrict), `cron_expression` (≤200, at most hourly), `time_zone_id` (IANA ≤100, default `UTC`), `status` (`Active`/`Disabled`/`Archived`), `last_triggered_at NULL`, `last_candidates_detected NULL`, `last_proposals_created NULL` (last scheduled-scan outcome only), `created_by`, timestamps; unique `(project_id)` (exactly one schedule per project; the service layer enforces the same rule). Temporal owns firing/next-run — `next_run_at` is deliberately NOT persisted. No secret/credential columns. Scheduled scans only create `Proposed` maintenance rows; approval/application stay human-gated.
+
 ### executions
 `id UUID PK`, `project_id FK`, `suite_id`, `status`, `trigger_type`, `environment_id`, `workflow_id`, `idempotency_key NULL` (unique per project when set), `started_at`, `completed_at`, `created_by`, `created_at`.
 

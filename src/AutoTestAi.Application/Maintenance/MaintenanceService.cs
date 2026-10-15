@@ -77,9 +77,24 @@ public sealed class MaintenanceService : IMaintenanceService
     public async Task<MaintenanceScanResult> ScanAsync(Guid projectId, CancellationToken ct)
     {
         await _authorization.RequireProjectAccessAsync(projectId, Permissions.TestCasesManage, ct);
-        // Manual throttle on existing per-project operation-budget mechanics:
+        return await ScanCoreAsync(projectId, "maintenance-scan", ct);
+    }
+
+    /// <summary>
+    /// System-initiated scan (Slice 10 scheduled execution). No caller
+    /// authorization — the scheduler (Temporal activity) validates
+    /// schedule/project ownership before invoking. Only callable server-side.
+    /// Uses a dedicated operation budget so scheduled ticks neither consume
+    /// the interactive budget nor bypass bounding.
+    /// </summary>
+    public Task<MaintenanceScanResult> ScanAsSystemAsync(Guid projectId, CancellationToken ct)
+        => ScanCoreAsync(projectId, "maintenance-scheduled-scan", ct);
+
+    private async Task<MaintenanceScanResult> ScanCoreAsync(Guid projectId, string budgetOperation, CancellationToken ct)
+    {
+        // Throttle on existing per-project operation-budget mechanics:
         // bounded synchronous scans, 429 when exceeded, no new infrastructure.
-        _rateLimiter.CheckOperationOrThrow(projectId, "maintenance-scan", "maintenance",
+        _rateLimiter.CheckOperationOrThrow(projectId, budgetOperation, "maintenance",
             ScansPerMinute, "Maintenance scan rate limit exceeded for this project");
 
         var now = _clock.UtcNow;

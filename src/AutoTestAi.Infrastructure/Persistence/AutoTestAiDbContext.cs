@@ -43,6 +43,7 @@ public sealed class AutoTestAiDbContext : DbContext
     public DbSet<SelfHealingPolicy> SelfHealingPolicies => Set<SelfHealingPolicy>();
     public DbSet<SelfHealingAttempt> SelfHealingAttempts => Set<SelfHealingAttempt>();
     public DbSet<MaintenanceProposal> MaintenanceProposals => Set<MaintenanceProposal>();
+    public DbSet<MaintenanceScanSchedule> MaintenanceScanSchedules => Set<MaintenanceScanSchedule>();
     public DbSet<VisualBaseline> VisualBaselines => Set<VisualBaseline>();
     public DbSet<VariableSet> VariableSets => Set<VariableSet>();
     public DbSet<EnvironmentSecret> EnvironmentSecrets => Set<EnvironmentSecret>();
@@ -290,6 +291,21 @@ public sealed class AutoTestAiDbContext : DbContext
         modelBuilder.Entity<MaintenanceProposal>().Property(p => p.SignalType).HasMaxLength(100);
         modelBuilder.Entity<MaintenanceProposal>().Property(p => p.RejectionReason).HasMaxLength(500);
         modelBuilder.Entity<MaintenanceProposal>().Property(p => p.RowVersion).IsConcurrencyToken();
+
+        // --- maintenance scan schedules (Phase 4 Slice 10, additive) ---
+        modelBuilder.Entity<MaintenanceScanSchedule>().ToTable("maintenance_scan_schedules");
+        // One schedule per project: concurrent creates collide here; the
+        // service additionally enforces the invariant for stores without
+        // unique-index support.
+        modelBuilder.Entity<MaintenanceScanSchedule>().HasIndex(s => s.ProjectId).IsUnique();
+        modelBuilder.Entity<MaintenanceScanSchedule>().Property(s => s.Status).HasConversion<string>();
+        modelBuilder.Entity<MaintenanceScanSchedule>().Property(s => s.CronExpression).HasMaxLength(200);
+        modelBuilder.Entity<MaintenanceScanSchedule>().Property(s => s.TimeZoneId).HasMaxLength(100);
+        modelBuilder.Entity<MaintenanceScanSchedule>()
+            .HasOne<Project>()
+            .WithMany()
+            .HasForeignKey(s => s.ProjectId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         // --- visual baselines (Phase 3 Slice 3C-4D-1, additive) ---
         modelBuilder.Entity<VisualBaseline>().ToTable("visual_baselines");

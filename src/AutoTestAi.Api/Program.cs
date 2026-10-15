@@ -243,6 +243,7 @@ app.MapSelfHealingEndpoints();
 app.MapDashboardEndpoints();
 app.MapAuditEndpoints();
 app.MapMaintenanceEndpoints();
+app.MapMaintenanceScanScheduleEndpoints();
 app.MapExecutionGridEndpoints();
 app.MapWebhookEndpoints();
 app.MapMobileEndpoints();

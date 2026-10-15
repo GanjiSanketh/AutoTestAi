@@ -88,7 +88,28 @@ export const maintenanceKeys = {
     [...maintenanceKeys.all, 'list', projectId, filters, page] as const,
   detail: (projectId: string, proposalId: string) =>
     [...maintenanceKeys.all, 'detail', projectId, proposalId] as const,
+  schedule: (projectId: string) =>
+    [...maintenanceKeys.all, 'schedule', projectId] as const,
 };
+
+export interface MaintenanceScanSchedule {
+  id: string;
+  projectId: string;
+  cronExpression: string;
+  timeZoneId: string;
+  status: string;
+  lastTriggeredAt: string | null;
+  lastCandidatesDetected: number | null;
+  lastProposalsCreated: number | null;
+  nextRunAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MaintenanceScanScheduleInput {
+  cronExpression: string;
+  timeZoneId?: string;
+}
 
 /** Centralized maintenance API surface — no raw fetch calls in components. */
 export const maintenanceEndpoints = {
@@ -111,4 +132,18 @@ export const maintenanceEndpoints = {
       `/api/v1/projects/${projectId}/maintenance/proposals/${proposalId}/reject`,
       { reason },
     ),
+  getSchedule: (projectId: string) =>
+    api.get<MaintenanceScanSchedule>(`/api/v1/projects/${projectId}/maintenance/schedule`),
+  createSchedule: (projectId: string, input: MaintenanceScanScheduleInput) =>
+    api.post<MaintenanceScanSchedule>(`/api/v1/projects/${projectId}/maintenance/schedule`, input),
+  updateSchedule: (projectId: string, input: MaintenanceScanScheduleInput) =>
+    api.put<MaintenanceScanSchedule>(`/api/v1/projects/${projectId}/maintenance/schedule`, input),
+  pauseSchedule: (projectId: string) =>
+    api.post<void>(`/api/v1/projects/${projectId}/maintenance/schedule/pause`, {}),
+  resumeSchedule: (projectId: string) =>
+    api.post<void>(`/api/v1/projects/${projectId}/maintenance/schedule/resume`, {}),
+  deleteSchedule: (projectId: string) =>
+    api.delete<void>(`/api/v1/projects/${projectId}/maintenance/schedule`),
+  nextScheduleRun: (projectId: string) =>
+    api.get<{ nextRunAt: string }>(`/api/v1/projects/${projectId}/maintenance/schedule/next-run`),
 };

@@ -8,7 +8,30 @@ import { projectsEndpoints } from '../../lib/api/endpoints/projects';
 import { useProfile } from '../../lib/auth/useProfile';
 import { hasPermission } from '../../lib/auth/permissions';
 
-vi.mock('../../lib/api/endpoints/maintenance');
+vi.mock('../../lib/api/endpoints/maintenance', () => ({
+  maintenanceKeys: {
+    all: ['maintenance'],
+    list: (projectId: string, filters: unknown, page: number) =>
+      ['maintenance', 'list', projectId, filters, page],
+    detail: (projectId: string, proposalId: string) =>
+      ['maintenance', 'detail', projectId, proposalId],
+    schedule: (projectId: string) => ['maintenance', 'schedule', projectId],
+  },
+  maintenanceEndpoints: {
+    list: vi.fn(),
+    detail: vi.fn(),
+    scan: vi.fn(),
+    approve: vi.fn(),
+    reject: vi.fn(),
+    getSchedule: vi.fn(),
+    createSchedule: vi.fn(),
+    updateSchedule: vi.fn(),
+    pauseSchedule: vi.fn(),
+    resumeSchedule: vi.fn(),
+    deleteSchedule: vi.fn(),
+    nextScheduleRun: vi.fn(),
+  },
+}));
 vi.mock('../../lib/api/endpoints/projects');
 vi.mock('../../lib/auth/useProfile');
 vi.mock('../../lib/auth/permissions');
@@ -90,6 +113,9 @@ describe('MaintenanceInboxPage', () => {
     vi.clearAllMocks();
     mockProjectsEndpoints.get.mockResolvedValue(mockProject);
     mockMaintenanceEndpoints.list.mockResolvedValue(mockPagedResult);
+    mockMaintenanceEndpoints.getSchedule.mockRejectedValue(
+      Object.assign(new Error('Not Found'), { status: 404 }),
+    );
     mockMaintenanceEndpoints.scan.mockResolvedValue({
       candidatesDetected: 1,
       proposalsCreated: 1,

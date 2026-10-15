@@ -13,6 +13,7 @@ import { projectsEndpoints, projectKeys } from '../../lib/api/endpoints/projects
 import { useProfile } from '../../lib/auth/useProfile';
 import { Permissions, hasPermission } from '../../lib/auth/permissions';
 import { MaintenanceDetailDrawer } from './MaintenanceDetailDrawer';
+import { MaintenanceScheduleCard } from './MaintenanceScheduleCard';
 
 const PAGE_SIZE = 25;
 
@@ -81,6 +82,7 @@ export function MaintenanceInboxPage() {
   const [committed, setCommitted] = useState<{ search: string; filters: MaintenanceFilters }>({ search: '', filters: {} });
   const [page, setPage] = useState(1);
   const [detailOpen, setDetailOpen] = useState<string | null>(null);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   const project = useQuery({
     queryKey: projectKeys.details(projectId),
@@ -137,6 +139,12 @@ export function MaintenanceInboxPage() {
           )}
         </div>
       </div>
+
+      <MaintenanceScheduleCard projectId={projectId} canManage={canManage} onError={setScheduleError} />
+
+      {scheduleError && (
+        <p role="alert" className="text-sm text-red-600">{scheduleError}</p>
+      )}
 
       <form onSubmit={applyFilters} className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-48 flex-1 flex-col gap-1 text-xs font-medium text-slate-500 sm:flex-none sm:basis-64">
