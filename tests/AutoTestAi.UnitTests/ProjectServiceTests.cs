@@ -148,6 +148,8 @@ internal sealed class FakeUserDirectory : IUserDirectory
         => Task.FromResult(_ids.TryGetValue(externalIdentityId, out var id) ? (Guid?)id : null);
     public Task<Guid> EnsureProvisionedAsync(string externalIdentityId, string? email, string? displayName, CancellationToken ct)
         => Task.FromResult(Guid.NewGuid());
+    public Task<(Guid UserId, bool Created)> EnsureProvisionedWithOutcomeAsync(string externalIdentityId, string? email, string? displayName, CancellationToken ct)
+        => Task.FromResult((Guid.NewGuid(), false));
 }
 
 public sealed class ProjectServiceTests

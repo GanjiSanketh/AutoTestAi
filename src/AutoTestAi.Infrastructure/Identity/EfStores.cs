@@ -59,6 +59,18 @@ public sealed class EfUserDirectory : IUserDirectory
     public async Task<Guid> EnsureProvisionedAsync(
         string externalIdentityId, string? email, string? displayName,
         CancellationToken cancellationToken)
+        => (await EnsureProvisionedWithOutcomeAsync(
+            externalIdentityId, email, displayName, cancellationToken)).UserId;
+
+    /// <summary>
+    /// First-seen users are inserted here and only here; <c>Created</c> is
+    /// true solely for the successful insert. A concurrent loser collides on
+    /// the unique external-identity index and throws instead of reporting a
+    /// false creation, so callers never emit duplicate first-seen events.
+    /// </summary>
+    public async Task<(Guid UserId, bool Created)> EnsureProvisionedWithOutcomeAsync(
+        string externalIdentityId, string? email, string? displayName,
+        CancellationToken cancellationToken)
     {
         var user = await _db.Users
             .FirstOrDefaultAsync(u => u.ExternalIdentityId == externalIdentityId, cancellationToken);
@@ -71,7 +83,7 @@ public sealed class EfUserDirectory : IUserDirectory
             if (name is not null && user.DisplayName != name) user.DisplayName = name;
             user.UpdatedAt = DateTimeOffset.UtcNow;
             await _db.SaveChangesAsync(cancellationToken);
-            return user.Id;
+            return (user.Id, false);
         }
 
         user = new Domain.Entities.User
@@ -85,6 +97,6 @@ public sealed class EfUserDirectory : IUserDirectory
         await _db.SaveChangesAsync(cancellationToken);
         // Log the category only — never tokens, secrets or contact details beyond the stable id.
         _logger.LogInformation("Provisioned application user for external identity {ExternalIdentityId}.", externalIdentityId);
-        return user.Id;
+        return (user.Id, true);
     }
 }

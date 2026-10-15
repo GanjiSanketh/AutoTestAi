@@ -33,7 +33,15 @@ public static class DependencyInjection
         services.AddSingleton<AiAnalysisValidator>();
         services.AddSingleton<SelfHealing.SelfHealingAiPromptBuilder>();
         services.AddSingleton<AiGenerationRateLimiter>();
-        services.AddScoped<IAuthorizationService, AuthorizationService>();
+        services.AddScoped<Authorization.AuthorizationService>();
+        services.AddSingleton<Authorization.AuthorizationDenialDedup>();
+        services.AddScoped<Authorization.IAuthorizationService>(provider =>
+            new Authorization.AuditingAuthorizationService(
+                provider.GetRequiredService<Authorization.AuthorizationService>(),
+                provider.GetRequiredService<Audit.IAuditService>(),
+                provider.GetRequiredService<Projects.IProjectStore>(),
+                provider.GetRequiredService<Identity.ICurrentUserService>(),
+                provider.GetRequiredService<Authorization.AuthorizationDenialDedup>()));
         services.AddScoped<IExecutionSubscriptionAuthorizer, ExecutionSubscriptionAuthorizer>();
         services.AddScoped<IProjectService, ProjectService>();
         services.AddScoped<ITestCaseService, TestCaseService>();

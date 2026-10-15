@@ -25,4 +25,13 @@ public interface IUserDirectory
     Task<Guid> EnsureProvisionedAsync(
         string externalIdentityId, string? email, string? displayName,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Provisioning with creation outcome (Phase 4 Slice 11). <c>Created</c>
+    /// is true only when this call inserted the user row; concurrent losers
+    /// surface the unique-identity failure instead of a false creation.
+    /// </summary>
+    Task<(Guid UserId, bool Created)> EnsureProvisionedWithOutcomeAsync(
+        string externalIdentityId, string? email, string? displayName,
+        CancellationToken cancellationToken);
 }

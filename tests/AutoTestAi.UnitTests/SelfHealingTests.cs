@@ -167,6 +167,7 @@ public sealed class SelfHealingTests
     {
         public Task<Guid?> FindAppUserIdAsync(string externalId, CancellationToken ct) => Task.FromResult<Guid?>(null);
         public Task<Guid> EnsureProvisionedAsync(string externalId, string? email, string? displayName, CancellationToken ct) => Task.FromResult(Guid.NewGuid());
+        public Task<(Guid UserId, bool Created)> EnsureProvisionedWithOutcomeAsync(string externalId, string? email, string? displayName, CancellationToken ct) => Task.FromResult((Guid.NewGuid(), false));
     }
 
     private sealed class FakeCurrentUser : ICurrentUserService

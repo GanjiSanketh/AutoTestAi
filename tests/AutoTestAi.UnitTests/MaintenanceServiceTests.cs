@@ -169,6 +169,8 @@ public sealed class MaintenanceServiceTests
             => Task.FromResult<Guid?>(ReviewerId);
         public Task<Guid> EnsureProvisionedAsync(string externalIdentityId, string? email, string? displayName, CancellationToken ct)
             => Task.FromResult(ReviewerId);
+        public Task<(Guid UserId, bool Created)> EnsureProvisionedWithOutcomeAsync(string externalIdentityId, string? email, string? displayName, CancellationToken ct)
+            => Task.FromResult((ReviewerId, false));
     }
 
     private sealed class FixedClock : IDateTimeProvider

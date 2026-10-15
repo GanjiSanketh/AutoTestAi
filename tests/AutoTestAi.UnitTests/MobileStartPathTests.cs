@@ -171,6 +171,8 @@ public sealed class MobileStartPathTests
             => Task.FromResult<Guid?>(Guid.NewGuid());
         public Task<Guid> EnsureProvisionedAsync(string e, string? email, string? d, CancellationToken ct)
             => Task.FromResult(Guid.NewGuid());
+        public Task<(Guid UserId, bool Created)> EnsureProvisionedWithOutcomeAsync(string e, string? email, string? d, CancellationToken ct)
+            => Task.FromResult((Guid.NewGuid(), false));
     }
 
     private sealed record Fixture(

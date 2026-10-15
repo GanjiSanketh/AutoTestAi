@@ -68,6 +68,8 @@ public sealed class VisualBaselineTests
             => Task.FromResult<Guid?>(Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"));
         public Task<Guid> EnsureProvisionedAsync(string externalIdentityId, string? email, string? displayName, CancellationToken cancellationToken)
             => Task.FromResult(Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"));
+        public Task<(Guid UserId, bool Created)> EnsureProvisionedWithOutcomeAsync(string externalIdentityId, string? email, string? displayName, CancellationToken cancellationToken)
+            => Task.FromResult((Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), false));
     }
 
     private sealed class FakeStore : IVisualBaselineStore

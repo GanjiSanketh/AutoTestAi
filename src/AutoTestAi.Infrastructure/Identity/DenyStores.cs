@@ -28,4 +28,9 @@ public sealed class NullUserDirectory : IUserDirectory
         string externalIdentityId, string? email, string? displayName,
         CancellationToken cancellationToken)
         => Task.FromResult(Guid.Empty);
+
+    public Task<(Guid UserId, bool Created)> EnsureProvisionedWithOutcomeAsync(
+        string externalIdentityId, string? email, string? displayName,
+        CancellationToken cancellationToken)
+        => Task.FromResult((Guid.Empty, false));
 }
