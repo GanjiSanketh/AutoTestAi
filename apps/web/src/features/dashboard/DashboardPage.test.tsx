@@ -43,6 +43,17 @@ vi.mock('../../lib/api/endpoints/projects', () => ({
   projectsEndpoints: { list: vi.fn() },
 }));
 
+vi.mock('../../lib/api/endpoints/slaTargets', () => ({
+  slaTargetKeys: {
+    all: ['sla-targets'],
+    detail: (p: string) => ['sla-targets', 'detail', p],
+  },
+  slaTargetEndpoints: {
+    get: vi.fn(),
+    upsert: vi.fn(),
+  },
+}));
+
 vi.mock('../../lib/auth/useProfile', () => ({
   useProfile: vi.fn(),
 }));

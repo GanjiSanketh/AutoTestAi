@@ -3,6 +3,8 @@ import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ExecutiveSection } from './ExecutiveSection';
 import { dashboardEndpoints } from '../../lib/api/endpoints/dashboard';
+import { slaTargetEndpoints } from '../../lib/api/endpoints/slaTargets';
+import { useProfile } from '../../lib/auth/useProfile';
 import { ApiError } from '../../lib/api/client';
 
 vi.mock('../../lib/api/endpoints/dashboard', () => ({
@@ -23,14 +25,31 @@ vi.mock('../../lib/api/endpoints/dashboard', () => ({
   },
 }));
 
+vi.mock('../../lib/auth/useProfile', () => ({
+  useProfile: vi.fn(),
+}));
+
 vi.mock('echarts', () => ({
   init: vi.fn(() => ({ setOption: vi.fn(), resize: vi.fn(), dispose: vi.fn() })),
+}));
+
+vi.mock('../../lib/api/endpoints/slaTargets', () => ({
+  slaTargetKeys: {
+    all: ['sla-targets'],
+    detail: (p: string) => ['sla-targets', 'detail', p],
+  },
+  slaTargetEndpoints: {
+    get: vi.fn(),
+    upsert: vi.fn(),
+  },
 }));
 
 const mockedExecutive = vi.mocked(dashboardEndpoints.executive);
 const mockedFlakinessTrend = vi.mocked(dashboardEndpoints.flakinessTrend);
 const mockedHealing = vi.mocked(dashboardEndpoints.healing);
 const mockedDurations = vi.mocked(dashboardEndpoints.durations);
+const mockedSlaGet = vi.mocked(slaTargetEndpoints.get);
+const mockedProfile = vi.mocked(useProfile);
 
 const overview = (overrides = {}) => ({
   projectId: 'p1',
@@ -72,6 +91,11 @@ const overview = (overrides = {}) => ({
 
 function renderSection() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  mockedProfile.mockReturnValue({
+    data: { permissions: ['reports.read', 'dashboard.read'] },
+    isLoading: false,
+  } as never);
+  mockedSlaGet.mockResolvedValue({ targets: null, compliance: null });
   return render(
     <QueryClientProvider client={client}>
       <ExecutiveSection projectId="p1" range={{ from: '2026-08-30' }} enabled />

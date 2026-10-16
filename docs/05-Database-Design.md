@@ -95,6 +95,9 @@ users/projects → audit_events
 ### auto_ticket_policies (Slice 10)
 `id UUID PK`, `project_id FK UNIQUE` (one policy per project; absence means automation disabled), `enabled`, `integration_id NULL` (pinned Jira integration; NULL resolves to the project default), `severities` (CSV ≤200), `defect_statuses` (CSV ≤200), `classifications` (CSV ≤200), `minimum_confidence NULL` (0–1; NULL disables the filter), `updated_by NULL`, timestamps. No secrets: the policy references an integration row and never carries credentials.
 
+### sla_target_policies (Phase 4 Slice 13)
+`id UUID PK`, `project_id` unique (one target configuration per project; absence means unconfigured), `critical_days`, `high_days`, `medium_days`, `low_days` (integer day thresholds 1–365, validated in the service), `updated_by NULL`, timestamps. No secrets, no defect references. Additive migration only; existing defect rows untouched.
+
 ### self_healing_policies (Slice 11)
 `id UUID PK`, `project_id FK UNIQUE` (one policy per project; absence means healing disabled), `enabled`, `ai_fallback_enabled` (requires `enabled`), `max_attempts_per_step` (always 1 in Slice 11), `min_deterministic_score NULL` (0–100; NULL = conservative default), `min_ai_confidence NULL` (0–1; advisory only, NULL disables the filter), `allowed_strategies` (CSV ≤200; empty = safe default set), `updated_by NULL`, timestamps. No secrets, DOM, or credentials.
 

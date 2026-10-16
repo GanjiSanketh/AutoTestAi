@@ -633,6 +633,33 @@ public sealed class EfReportQueryStore : IReportQueryStore
                 && d.CreatedAt >= range.From && d.CreatedAt <= range.To)
             .CountAsync(ct);
 
+    /// <summary>
+    /// Open-defect SLA breach slices (Phase 4 Slice 13). Two bounded counts
+    /// per supplied severity over open/in-progress defects only; breach uses
+    /// a strict less-than against the threshold instant (age equal to the
+    /// threshold stays compliant). Deterministic severity order; no text
+    /// columns selected.
+    /// </summary>
+    public async Task<IReadOnlyList<Application.Sla.SlaSeverityCount>> GetSlaBreachCountsAsync(
+        Guid projectId, IReadOnlyDictionary<string, int> thresholdsDays, DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var rows = new List<Application.Sla.SlaSeverityCount>();
+        foreach (var (severity, days) in thresholdsDays.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
+            if (!Enum.TryParse<Domain.Enums.Severity>(severity, ignoreCase: true, out var parsed))
+                continue;
+            var eligible = _db.Defects.Where(d => d.ProjectId == projectId &&
+                (d.Status == Domain.Enums.DefectStatus.Open || d.Status == Domain.Enums.DefectStatus.InProgress) &&
+                d.Severity == parsed);
+            var threshold = now.AddDays(-Math.Max(1, days));
+            var eligibleCount = await eligible.CountAsync(ct);
+            var breachedCount = await eligible.Where(d => d.CreatedAt < threshold).CountAsync(ct);
+            rows.Add(new Application.Sla.SlaSeverityCount(severity, days, eligibleCount, breachedCount));
+        }
+        return rows;
+    }
+
     public async Task<IReadOnlyList<NamedCount>> GetOpenDefectAgingAsync(
         Guid projectId, ReportDateRange range, CancellationToken ct)
     {
@@ -987,6 +1014,7 @@ public sealed class UnavailableReportQueryStore : IReportQueryStore
     public Task<int> GetOpenCriticalHighDefectCountAsync(Guid p, CancellationToken ct) => Fail<int>();
     public Task<int> GetDefectsCreatedCountAsync(Guid p, ReportDateRange r, CancellationToken ct) => Fail<int>();
     public Task<IReadOnlyList<NamedCount>> GetOpenDefectAgingAsync(Guid p, ReportDateRange r, CancellationToken ct) => Fail<IReadOnlyList<NamedCount>>();
+    public Task<IReadOnlyList<Application.Sla.SlaSeverityCount>> GetSlaBreachCountsAsync(Guid p, IReadOnlyDictionary<string, int> t, DateTimeOffset n, CancellationToken ct) => Fail<IReadOnlyList<Application.Sla.SlaSeverityCount>>();
     public Task<DurationStats> GetDurationStatsAsync(Guid p, ReportDateRange r, CancellationToken ct) => Fail<DurationStats>();
     public Task<IReadOnlyList<long>> GetDurationsCappedAsync(Guid p, ReportDateRange r, int cap, CancellationToken ct) => Fail<IReadOnlyList<long>>();
     public Task<IReadOnlyList<DurationDayRow>> GetDurationByDayAsync(Guid p, ReportDateRange r, CancellationToken ct) => Fail<IReadOnlyList<DurationDayRow>>();

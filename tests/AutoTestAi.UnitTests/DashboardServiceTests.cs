@@ -83,6 +83,9 @@ internal sealed class FakeReportQueryStore : IReportQueryStore
         => Task.FromResult(DefectsCreatedValue);
     public Task<IReadOnlyList<NamedCount>> GetOpenDefectAgingAsync(Guid p, ReportDateRange r, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<NamedCount>>(AgingBuckets);
+    public List<AutoTestAi.Application.Sla.SlaSeverityCount> SlaSlices = new();
+    public Task<IReadOnlyList<AutoTestAi.Application.Sla.SlaSeverityCount>> GetSlaBreachCountsAsync(Guid p, IReadOnlyDictionary<string, int> t, DateTimeOffset n, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<AutoTestAi.Application.Sla.SlaSeverityCount>>(SlaSlices);
     public Task<DurationStats> GetDurationStatsAsync(Guid p, ReportDateRange r, CancellationToken ct)
         => Task.FromResult(DurationStatsValue);
     public Task<IReadOnlyList<long>> GetDurationsCappedAsync(Guid p, ReportDateRange r, int cap, CancellationToken ct)
@@ -138,7 +141,7 @@ public sealed class DashboardServiceTests
         var store = new FakeReportQueryStore();
         var memberships = new StubMembershipStore();
         if (member) memberships.Add(user.ExternalIdentityId!, ProjectA);
-        return (new DashboardService(store, new AuthorizationService(user, memberships)), store);
+        return (new DashboardService(store, new AuthorizationService(user, memberships), new FakeSlaTargetStore()), store);
     }
 
     private static ReportDateRange Range()
@@ -280,7 +283,7 @@ public sealed class DashboardServiceTests
         var user = Member();
         var memberships = new StubMembershipStore();
         memberships.Add(user.ExternalIdentityId!, ProjectA);
-        var svc = new DashboardService(new FakeReportQueryStore(), new AuthorizationService(user, memberships));
+        var svc = new DashboardService(new FakeReportQueryStore(), new AuthorizationService(user, memberships), new FakeSlaTargetStore());
         await Assert.ThrowsAsync<ForbiddenException>(
             () => svc.GetSummaryAsync(ProjectB, Range(), CancellationToken.None));
     }

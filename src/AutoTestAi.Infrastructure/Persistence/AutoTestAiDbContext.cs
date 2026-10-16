@@ -40,6 +40,7 @@ public sealed class AutoTestAiDbContext : DbContext
     public DbSet<Ticket> Tickets => Set<Ticket>();
     public DbSet<Integration> Integrations => Set<Integration>();
     public DbSet<AutoTicketPolicy> AutoTicketPolicies => Set<AutoTicketPolicy>();
+    public DbSet<SlaTargetPolicy> SlaTargetPolicies => Set<SlaTargetPolicy>();
     public DbSet<SelfHealingPolicy> SelfHealingPolicies => Set<SelfHealingPolicy>();
     public DbSet<SelfHealingAttempt> SelfHealingAttempts => Set<SelfHealingAttempt>();
     public DbSet<MaintenanceProposal> MaintenanceProposals => Set<MaintenanceProposal>();
@@ -245,6 +246,11 @@ public sealed class AutoTestAiDbContext : DbContext
         modelBuilder.Entity<AutoTicketPolicy>().Property(p => p.Severities).HasMaxLength(200);
         modelBuilder.Entity<AutoTicketPolicy>().Property(p => p.DefectStatuses).HasMaxLength(200);
         modelBuilder.Entity<AutoTicketPolicy>().Property(p => p.Classifications).HasMaxLength(200);
+
+        // --- SLA targets (Phase 4 Slice 13) ---
+        modelBuilder.Entity<SlaTargetPolicy>().ToTable("sla_target_policies");
+        // One target configuration per project: evaluation scope is always project-local.
+        modelBuilder.Entity<SlaTargetPolicy>().HasIndex(p => p.ProjectId).IsUnique();
 
         // --- self-healing (Phase 2 Slice 11) ---
         modelBuilder.Entity<SelfHealingPolicy>().ToTable("self_healing_policies");

@@ -239,6 +239,7 @@ app.MapFailureAnalysisEndpoints();
 app.MapDefectEndpoints();
 app.MapTicketEndpoints();
 app.MapAutoTicketEndpoints();
+app.MapSlaTargetEndpoints();
 app.MapSelfHealingEndpoints();
 app.MapDashboardEndpoints();
 app.MapAuditEndpoints();

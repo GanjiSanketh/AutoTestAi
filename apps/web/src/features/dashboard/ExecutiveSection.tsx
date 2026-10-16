@@ -9,6 +9,7 @@ import {
   dashboardKeys,
   type DateRange,
 } from '../../lib/api/endpoints/dashboard';
+import { SlaComplianceCard } from './SlaComplianceCard';
 
 function pct1(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
@@ -354,7 +355,8 @@ export function ExecutiveSection({
           <CardHeader>
             <CardTitle>Duration &amp; Defect Aging</CardTitle>
             <CardDescription>
-              Terminal execution durations plus open-defect age (no SLA targets are configured)
+              Terminal execution durations plus open-defect age
+              {durations.data ? (durations.data.slaConfigured ? ' (SLA targets configured — see compliance below)' : ' (no SLA targets are configured)') : ''}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -394,6 +396,7 @@ export function ExecutiveSection({
             )}
           </CardContent>
         </Card>
+        <SlaComplianceCard projectId={projectId} />
       </div>
     </div>
   );

@@ -21,11 +21,13 @@ public sealed class DashboardService : IDashboardService
 
     private readonly IReportQueryStore _store;
     private readonly IAuthorizationService _authorization;
+    private readonly Sla.ISlaTargetStore _slaTargets;
 
-    public DashboardService(IReportQueryStore store, IAuthorizationService authorization)
+    public DashboardService(IReportQueryStore store, IAuthorizationService authorization, Sla.ISlaTargetStore slaTargets)
     {
         _store = store;
         _authorization = authorization;
+        _slaTargets = slaTargets;
     }
 
     public async Task<DashboardSummaryDto> GetSummaryAsync(
@@ -310,12 +312,13 @@ public sealed class DashboardService : IDashboardService
         var capped = await _store.GetDurationsCappedAsync(projectId, range, 50000, ct);
         var byDay = await _store.GetDurationByDayAsync(projectId, range, ct);
         var aging = await _store.GetOpenDefectAgingAsync(projectId, range, ct);
+        var slaConfigured = await _slaTargets.GetByProjectAsync(projectId, ct) is not null;
         return new DurationAnalyticsDto(
             projectId, range.From, range.To,
             stats.Count, stats.AverageMs, stats.MinMs, stats.MaxMs, stats.TotalMs,
             AnalyticsCalculations.Percentile(capped, 50),
             AnalyticsCalculations.Percentile(capped, 90),
-            false,
+            slaConfigured,
             aging.Select(a => new AgingBucketDto(a.Name, a.Count)).ToList(),
             BuildDurationTrend(range, byDay));
     }

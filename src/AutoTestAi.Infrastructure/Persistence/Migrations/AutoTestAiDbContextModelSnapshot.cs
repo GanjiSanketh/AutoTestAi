@@ -1536,6 +1536,44 @@ namespace AutoTestAi.Infrastructure.Persistence.Migrations
                     b.ToTable("self_healing_policies", (string)null);
                 });
 
+            modelBuilder.Entity("AutoTestAi.Domain.Entities.SlaTargetPolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("CriticalDays")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("HighDays")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LowDays")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MediumDays")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId")
+                        .IsUnique();
+
+                    b.ToTable("sla_target_policies", (string)null);
+                });
+
             modelBuilder.Entity("AutoTestAi.Domain.Entities.SuiteTestCase", b =>
                 {
                     b.Property<Guid>("SuiteId")

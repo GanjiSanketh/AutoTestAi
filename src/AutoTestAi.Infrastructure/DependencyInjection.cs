@@ -70,6 +70,7 @@ public static class DependencyInjection
             services.AddScoped<Application.Mobile.IVisualBaselineStore, Mobile.EfVisualBaselineStore>();
             services.AddScoped<Application.Maintenance.IMaintenanceStore, Maintenance.EfMaintenanceStore>();
             services.AddScoped<Application.Maintenance.IMaintenanceScanScheduleStore, Maintenance.EfMaintenanceScanScheduleStore>();
+            services.AddScoped<Application.Sla.ISlaTargetStore, Sla.EfSlaTargetStore>();
             // Slice 3A: one vault class, two narrow capabilities. Execution
             // code resolves ISecretResolver; management resolves ISecretStore.
             services.AddScoped<EfSecretVault>();
@@ -107,6 +108,7 @@ public static class DependencyInjection
             services.AddSingleton<Application.Mobile.IVisualBaselineStore, Mobile.UnavailableVisualBaselineStore>();
             services.AddSingleton<Application.Maintenance.IMaintenanceStore, Maintenance.UnavailableMaintenanceStore>();
             services.AddSingleton<Application.Maintenance.IMaintenanceScanScheduleStore, Maintenance.UnavailableMaintenanceScanScheduleStore>();
+            services.AddSingleton<Application.Sla.ISlaTargetStore, Sla.UnavailableSlaTargetStore>();
             services.AddSingleton<ISecretResolver, Secrets.UnavailableSecretResolver>();
             services.AddSingleton<ISecretStore, Secrets.UnavailableSecretStore>();
         }

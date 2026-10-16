@@ -80,6 +80,23 @@ public sealed class Integration : EntityBase
 }
 
 /// <summary>
+/// Project-scoped SLA resolve-time targets (Phase 4 Slice 13).
+/// One row per project at most. Absence of a row means no targets are
+/// configured and no breach evaluation is reported. Thresholds measure the
+/// maximum age, in whole days, for currently open or in-progress defects of
+/// each severity; historical resolution times are never inferred.
+/// </summary>
+public sealed class SlaTargetPolicy : EntityBase
+{
+    public Guid ProjectId { get; set; }
+    public int CriticalDays { get; set; }
+    public int HighDays { get; set; }
+    public int MediumDays { get; set; }
+    public int LowDays { get; set; }
+    public Guid? UpdatedBy { get; set; }
+}
+
+/// <summary>
 /// Project-scoped automatic Jira ticket policy (Phase 2 Slice 10).
 /// One row per project at most. Absence of a row means automation is
 /// disabled. Evaluation is deterministic; no AI is involved.

@@ -58,6 +58,7 @@ public static class DependencyInjection
         services.AddScoped<SelfHealing.ISelfHealingService, SelfHealing.SelfHealingService>();
         services.AddScoped<Maintenance.IMaintenanceService, Maintenance.MaintenanceService>();
         services.AddScoped<Maintenance.IMaintenanceScanScheduleService, Maintenance.MaintenanceScanScheduleService>();
+        services.AddScoped<Sla.ISlaTargetService, Sla.SlaTargetService>();
         services.AddScoped<IDefectService, DefectService>();
         services.AddScoped<Tickets.ITicketService, Tickets.TicketService>();
         services.AddScoped<Tickets.IJiraIntegrationService, Tickets.JiraIntegrationService>();

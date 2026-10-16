@@ -28,7 +28,7 @@ public sealed class ExecutiveAnalyticsTests
         var store = new FakeReportQueryStore();
         var memberships = new StubMembershipStore();
         memberships.Add(user.ExternalIdentityId!, ProjectA);
-        return (new DashboardService(store, new AuthorizationService(user, memberships)), store);
+        return (new DashboardService(store, new AuthorizationService(user, memberships), new FakeSlaTargetStore()), store);
     }
 
     private static (ReportService Service, FakeReportQueryStore Store) Reports(ICurrentUserService user)
@@ -362,7 +362,7 @@ public sealed class ExecutiveAnalyticsTests
         var store = new FakeReportQueryStore();
         var memberships = new StubMembershipStore();
         var user = Member();
-        var dashboard = new DashboardService(store, new AuthorizationService(user, memberships));
+        var dashboard = new DashboardService(store, new AuthorizationService(user, memberships), new FakeSlaTargetStore());
         var reports = new ReportService(store, new AuthorizationService(user, memberships));
         await Assert.ThrowsAsync<ForbiddenException>(
             () => dashboard.GetExecutiveOverviewAsync(ProjectA, Range(), CancellationToken.None));

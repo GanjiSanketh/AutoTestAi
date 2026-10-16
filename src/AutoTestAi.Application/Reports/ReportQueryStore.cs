@@ -66,6 +66,17 @@ public interface IReportQueryStore
         Guid projectId, ReportDateRange range, AuditEventFilters filters,
         int skip, int take, CancellationToken ct);
 
+    /// <summary>
+    /// Open-defect SLA breach slices (Phase 4 Slice 13). For each supplied
+    /// severity threshold, counts eligible (open/in-progress) defects and the
+    /// breached subset (created strictly before now minus threshold days).
+    /// Read-only server-side aggregation; severities without a supplied
+    /// threshold are absent from the result.
+    /// </summary>
+    Task<IReadOnlyList<Sla.SlaSeverityCount>> GetSlaBreachCountsAsync(
+        Guid projectId, IReadOnlyDictionary<string, int> thresholdsDays, DateTimeOffset now,
+        CancellationToken ct);
+
     // ---------- executive analytics primitives (Slice 12; all server-side grouped) ----------
 
     /// <summary>Per-test verdict counts over terminal executions in the window.</summary>
