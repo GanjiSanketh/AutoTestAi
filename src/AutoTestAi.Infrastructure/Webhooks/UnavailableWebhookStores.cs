@@ -12,6 +12,8 @@ public sealed class UnavailableWebhookDeliveryStore : IWebhookDeliveryStore
     public Task<IReadOnlyList<WebhookDelivery>> ListByIntegrationAsync(Guid integrationId, int skip, int take, CancellationToken ct) => throw Unavailable();
     public Task<int> CountByIntegrationAsync(Guid integrationId, CancellationToken ct) => throw Unavailable();
     public Task<IReadOnlyList<WebhookDelivery>> ListStaleAcceptedAsync(DateTimeOffset olderThan, int take, CancellationToken ct) => throw Unavailable();
+    public Task<IReadOnlyList<WebhookDelivery>> ListExpiredAsync(DateTimeOffset cutoff, DateTimeOffset now, int take, CancellationToken ct) => throw Unavailable();
+    public Task<int> DeleteRangeAsync(IReadOnlyList<WebhookDelivery> rows, CancellationToken ct) => throw Unavailable();
     public Task AddAsync(WebhookDelivery delivery, CancellationToken ct) => throw Unavailable();
     public Task SaveChangesAsync(CancellationToken ct) => throw Unavailable();
 }

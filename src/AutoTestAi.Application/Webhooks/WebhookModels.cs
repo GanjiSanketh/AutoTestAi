@@ -101,6 +101,13 @@ public interface IWebhookProcessingService
 
     /// <summary>Re-drives a Failed delivery (authorized retry); same delivery id, idempotent.</summary>
     Task RetryAsync(Guid deliveryId, CancellationToken ct);
+
+    /// <summary>
+    /// Retention purge (Phase 4 Slice 12): removes one bounded batch of
+    /// expired terminal deliveries; returns the deleted count. Converges to
+    /// zero on repeats; safe to call concurrently across replicas.
+    /// </summary>
+    Task<int> PurgeExpiredAsync(CancellationToken ct);
 }
 
 public interface IWebhookDeliveryQueryService

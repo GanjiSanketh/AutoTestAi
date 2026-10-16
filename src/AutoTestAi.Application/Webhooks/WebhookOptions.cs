@@ -23,8 +23,17 @@ public sealed class WebhookOptions
     /// <summary>How many stale Accepted rows each reconciliation pass picks up.</summary>
     public int ReconciliationBatchSize { get; set; } = 25;
 
-    /// <summary>Delivery history retention in days (default 90; purge deferred — documented).</summary>
+    /// <summary>Delivery history retention in days (default 90). Values below 1
+    /// disable the retention purge (fail-safe: never delete on misconfiguration).</summary>
     public int RetentionDays { get; set; } = 90;
+
+    /// <summary>Master switch for the retention purge. When false, expired
+    /// deliveries are retained indefinitely. Default true: the first enabled
+    /// run only removes rows older than the retention cutoff.</summary>
+    public bool PurgeEnabled { get; set; } = true;
+
+    /// <summary>Maximum delivery rows removed per purge pass (clamped 1–1000).</summary>
+    public int PurgeBatchSize { get; set; } = 100;
 
     /// <summary>Master switch for async background processing (tests disable it).</summary>
     public bool BackgroundProcessingEnabled { get; set; } = true;

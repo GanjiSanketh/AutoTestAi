@@ -42,7 +42,12 @@ public sealed class WebhookBackgroundService : BackgroundService
         try
         {
             while (await timer.WaitForNextTickAsync(stoppingToken))
+            {
                 await ReconcileAsync(stoppingToken);
+                // Sequential within the tick: no self-overlap; crash-safe
+                // (stateless batches converge on the next pass).
+                await PurgeAsync(stoppingToken);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -75,6 +80,22 @@ public sealed class WebhookBackgroundService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Webhook reconciliation pass did not complete.");
+        }
+    }
+
+    private async Task PurgeAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _services.CreateScope();
+            var processing = scope.ServiceProvider.GetRequiredService<IWebhookProcessingService>();
+            await processing.PurgeExpiredAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            // Best-effort like reconciliation; per-pass outcomes are logged
+            // by the processing service (counts and cutoff only, no payloads).
+            _logger.LogWarning(ex, "Webhook retention purge pass did not complete.");
         }
     }
 

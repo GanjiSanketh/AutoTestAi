@@ -54,6 +54,25 @@ public sealed class WebhookProcessingTests
         public Task<IReadOnlyList<WebhookDelivery>> ListStaleAcceptedAsync(DateTimeOffset olderThan, int take, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<WebhookDelivery>>(Rows.Values
                 .Where(x => x.ProcessingStatus == WebhookProcessingStatus.Accepted && x.UpdatedAt < olderThan).ToList());
+        public Task<IReadOnlyList<WebhookDelivery>> ListExpiredAsync(DateTimeOffset cutoff, DateTimeOffset now, int take, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult<IReadOnlyList<WebhookDelivery>>(Rows.Values
+                .Where(x => x.ReceivedAt < cutoff &&
+                    (x.ProcessingStatus == WebhookProcessingStatus.Triggered ||
+                     x.ProcessingStatus == WebhookProcessingStatus.Failed ||
+                     x.ProcessingStatus == WebhookProcessingStatus.Rejected ||
+                     x.ProcessingStatus == WebhookProcessingStatus.Duplicate ||
+                     x.ProcessingStatus == WebhookProcessingStatus.Ignored) &&
+                    (x.ClaimToken == null || x.ClaimExpiresAt <= now))
+                .OrderBy(x => x.ReceivedAt).ThenBy(x => x.Id).Take(Math.Max(1, take)).ToList());
+        }
+        public Task<int> DeleteRangeAsync(IReadOnlyList<WebhookDelivery> rows, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            foreach (var r in rows) Rows.Remove(r.Id);
+            return Task.FromResult(rows.Count);
+        }
         public Task AddAsync(WebhookDelivery d, CancellationToken ct) { Rows[d.Id] = d; return Task.CompletedTask; }
         public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
     }
@@ -193,12 +212,15 @@ public sealed class WebhookProcessingTests
 
         public Fixture()
         {
-            Service = new WebhookProcessingService(Deliveries, Integrations, Projects, Suites, Members,
-                Cases, Executions, new FakeResolver(), Secrets, Queue, Audit, new FixedClock(),
-                Options.Create(new WebhookOptions()), NullLogger<WebhookProcessingService>.Instance);
+            Service = CreateService(this, new WebhookOptions());
             Suites.Suites[Suite] = new TestSuite { Id = Suite, ProjectId = Project, Name = "Smoke", Status = ProjectStatus.Active };
             Projects.Environments[Environment] = new TestEnvironment { Id = Environment, ProjectId = Project, Name = "prod", Status = ProjectStatus.Active };
         }
+
+        public static WebhookProcessingService CreateService(Fixture f, WebhookOptions options)
+            => new(f.Deliveries, f.Integrations, f.Projects, f.Suites, f.Members,
+                f.Cases, f.Executions, new FakeResolver(), f.Secrets, f.Queue, f.Audit, new FixedClock(),
+                Options.Create(options), NullLogger<WebhookProcessingService>.Instance);
 
         public void AddIntegration(string configJson, string provider = "github")
         {
@@ -361,5 +383,140 @@ public sealed class WebhookProcessingTests
         Assert.Equal(WebhookProcessingStatus.Failed, delivery.ProcessingStatus);
         Assert.Equal("invalid_secret_mapping", delivery.FailureReason);
         Assert.Empty(f.Executions.Started);
+    }
+
+    // ---------- retention purge (Phase 4 Slice 12) ----------
+
+    private static readonly DateTimeOffset PurgeNow = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+
+    private static WebhookDelivery PurgeRow(
+        DateTimeOffset receivedAt, WebhookProcessingStatus status,
+        Guid? claimToken = null, DateTimeOffset? claimExpiresAt = null)
+        => new()
+        {
+            IntegrationId = Integration,
+            ProjectId = Project,
+            Provider = "github",
+            DeliveryId = Guid.NewGuid().ToString("N"),
+            EventType = "push",
+            ReceivedAt = receivedAt,
+            PayloadHash = "hash",
+            VerificationStatus = WebhookVerificationStatus.Verified,
+            ProcessingStatus = status,
+            ClaimToken = claimToken,
+            ClaimExpiresAt = claimExpiresAt,
+            CreatedAt = receivedAt,
+            UpdatedAt = receivedAt,
+        };
+
+    private static WebhookProcessingService PurgeService(Fixture f, int retentionDays = 90, int batch = 100, bool enabled = true)
+        => Fixture.CreateService(f, new WebhookOptions
+        {
+            RetentionDays = retentionDays,
+            PurgeBatchSize = batch,
+            PurgeEnabled = enabled,
+        });
+
+    [Fact]
+    public async Task Purge_DeletesOnlyOldTerminalRows_WithExclusiveCutoff()
+    {
+        var f = new Fixture();
+        var cutoff = PurgeNow.AddDays(-90);
+        var oldTerminal = PurgeRow(cutoff.AddSeconds(-1), WebhookProcessingStatus.Triggered);
+        var oldFailed = PurgeRow(cutoff.AddDays(-10), WebhookProcessingStatus.Failed);
+        var oldRejected = PurgeRow(cutoff.AddDays(-10), WebhookProcessingStatus.Rejected);
+        var atCutoff = PurgeRow(cutoff, WebhookProcessingStatus.Triggered);
+        var recent = PurgeRow(cutoff.AddSeconds(1), WebhookProcessingStatus.Triggered);
+        foreach (var row in new[] { oldTerminal, oldFailed, oldRejected, atCutoff, recent })
+            f.Deliveries.Rows[row.Id] = row;
+
+        var deleted = await PurgeService(f).PurgeExpiredAsync(CancellationToken.None);
+
+        Assert.Equal(3, deleted);
+        Assert.DoesNotContain(oldTerminal.Id, f.Deliveries.Rows.Keys);
+        Assert.DoesNotContain(oldFailed.Id, f.Deliveries.Rows.Keys);
+        Assert.DoesNotContain(oldRejected.Id, f.Deliveries.Rows.Keys);
+        Assert.Contains(atCutoff.Id, f.Deliveries.Rows.Keys);
+        Assert.Contains(recent.Id, f.Deliveries.Rows.Keys);
+    }
+
+    [Fact]
+    public async Task Purge_PreservesNonTerminalAndLiveClaimRows()
+    {
+        var f = new Fixture();
+        var old = PurgeNow.AddDays(-100);
+        var accepted = PurgeRow(old, WebhookProcessingStatus.Accepted);
+        var acceptedExpiredClaim = PurgeRow(old, WebhookProcessingStatus.Accepted, Guid.NewGuid(), old);
+        var received = PurgeRow(old, WebhookProcessingStatus.Received);
+        var terminalLiveClaim = PurgeRow(old, WebhookProcessingStatus.Triggered,
+            Guid.NewGuid(), PurgeNow.AddMinutes(5));
+        var terminalExpiredClaim = PurgeRow(old, WebhookProcessingStatus.Ignored,
+            Guid.NewGuid(), old);
+        foreach (var row in new[] { accepted, acceptedExpiredClaim, received, terminalLiveClaim, terminalExpiredClaim })
+            f.Deliveries.Rows[row.Id] = row;
+
+        var deleted = await PurgeService(f).PurgeExpiredAsync(CancellationToken.None);
+
+        // Only the terminal row whose claim already expired is eligible;
+        // Accepted/Received rows stay for reconciliation, live leases stay fenced.
+        Assert.Equal(1, deleted);
+        Assert.Contains(accepted.Id, f.Deliveries.Rows.Keys);
+        Assert.Contains(acceptedExpiredClaim.Id, f.Deliveries.Rows.Keys);
+        Assert.Contains(received.Id, f.Deliveries.Rows.Keys);
+        Assert.Contains(terminalLiveClaim.Id, f.Deliveries.Rows.Keys);
+        Assert.DoesNotContain(terminalExpiredClaim.Id, f.Deliveries.Rows.Keys);
+    }
+
+    [Fact]
+    public async Task Purge_RespectsBatchLimit_AndConverges()
+    {
+        var f = new Fixture();
+        var old = PurgeNow.AddDays(-100);
+        for (var i = 0; i < 5; i++)
+        {
+            var row = PurgeRow(old.AddMinutes(-i), WebhookProcessingStatus.Triggered);
+            f.Deliveries.Rows[row.Id] = row;
+        }
+        var service = PurgeService(f, batch: 2);
+
+        Assert.Equal(2, await service.PurgeExpiredAsync(CancellationToken.None));
+        Assert.Equal(2, await service.PurgeExpiredAsync(CancellationToken.None));
+        Assert.Equal(1, await service.PurgeExpiredAsync(CancellationToken.None));
+        Assert.Equal(0, await service.PurgeExpiredAsync(CancellationToken.None));
+        Assert.Empty(f.Deliveries.Rows);
+    }
+
+    [Fact]
+    public async Task Purge_DisabledOrInvalidRetention_SkipsWithoutDeleting()
+    {
+        var f = new Fixture();
+        var row = PurgeRow(PurgeNow.AddDays(-100), WebhookProcessingStatus.Triggered);
+        f.Deliveries.Rows[row.Id] = row;
+
+        Assert.Equal(0, await PurgeService(f, enabled: false).PurgeExpiredAsync(CancellationToken.None));
+        Assert.Contains(row.Id, f.Deliveries.Rows.Keys);
+
+        Assert.Equal(0, await PurgeService(f, retentionDays: 0).PurgeExpiredAsync(CancellationToken.None));
+        Assert.Contains(row.Id, f.Deliveries.Rows.Keys);
+
+        Assert.Equal(0, await PurgeService(f, retentionDays: -5).PurgeExpiredAsync(CancellationToken.None));
+        Assert.Contains(row.Id, f.Deliveries.Rows.Keys);
+    }
+
+    [Fact]
+    public async Task Purge_CancelledToken_Propagates()
+    {
+        var f = new Fixture();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => PurgeService(f).PurgeExpiredAsync(cts.Token));
+    }
+
+    [Fact]
+    public async Task Purge_EmptyStore_ReturnsZero()
+    {
+        var f = new Fixture();
+        Assert.Equal(0, await PurgeService(f).PurgeExpiredAsync(CancellationToken.None));
     }
 }

@@ -44,6 +44,34 @@ public sealed class EfWebhookDeliveryStore : IWebhookDeliveryStore
     public async Task AddAsync(WebhookDelivery delivery, CancellationToken ct)
         => await _db.WebhookDeliveries.AddAsync(delivery, ct);
 
+    public async Task<IReadOnlyList<WebhookDelivery>> ListExpiredAsync(
+        DateTimeOffset cutoff, DateTimeOffset now, int take, CancellationToken ct)
+    {
+        var terminal = new[]
+        {
+            Domain.Enums.WebhookProcessingStatus.Triggered,
+            Domain.Enums.WebhookProcessingStatus.Failed,
+            Domain.Enums.WebhookProcessingStatus.Rejected,
+            Domain.Enums.WebhookProcessingStatus.Duplicate,
+            Domain.Enums.WebhookProcessingStatus.Ignored,
+        };
+        return await _db.WebhookDeliveries
+            .Where(d => d.ReceivedAt < cutoff &&
+                        terminal.Contains(d.ProcessingStatus) &&
+                        (d.ClaimToken == null || d.ClaimExpiresAt <= now))
+            .OrderBy(d => d.ReceivedAt)
+            .ThenBy(d => d.Id)
+            .Take(Math.Max(1, take))
+            .ToListAsync(ct);
+    }
+
+    public async Task<int> DeleteRangeAsync(IReadOnlyList<WebhookDelivery> rows, CancellationToken ct)
+    {
+        if (rows.Count == 0) return 0;
+        _db.WebhookDeliveries.RemoveRange(rows);
+        return await _db.SaveChangesAsync(ct);
+    }
+
     public Task SaveChangesAsync(CancellationToken ct)
         => _db.SaveChangesAsync(ct);
 }

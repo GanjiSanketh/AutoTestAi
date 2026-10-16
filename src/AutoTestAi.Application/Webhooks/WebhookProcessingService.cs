@@ -134,6 +134,48 @@ public sealed class WebhookProcessingService : IWebhookProcessingService
         return requeued;
     }
 
+    /// <summary>
+    /// Retention purge (Phase 4 Slice 12): deletes one bounded batch of
+    /// deliveries received strictly before the retention cutoff that are in
+    /// a terminal state and hold no live claim. Non-terminal rows (Received,
+    /// Accepted — including stale claims owned by reconciliation) and live
+    /// leases are never eligible. Terminal Failed rows lose retryability
+    /// once purged; that is the documented retention semantic. Converges:
+    /// repeats return zero when nothing eligible remains, and concurrent
+    /// runs converge because losers observe the rows as already gone.
+    /// </summary>
+    public async Task<int> PurgeExpiredAsync(CancellationToken ct)
+    {
+        if (!_options.PurgeEnabled)
+            return 0;
+        if (_options.RetentionDays < 1)
+        {
+            _logger.LogWarning("Webhook retention purge skipped: RetentionDays must be a positive day count.");
+            return 0;
+        }
+        var batch = Math.Clamp(_options.PurgeBatchSize, 1, 1000);
+        var now = _clock.UtcNow;
+        var cutoff = now.AddDays(-_options.RetentionDays);
+        var expired = await _deliveries.ListExpiredAsync(cutoff, now, batch, ct);
+        if (expired.Count == 0)
+            return 0;
+        int deleted;
+        try
+        {
+            deleted = await _deliveries.DeleteRangeAsync(expired, ct);
+        }
+        catch (Exception ex) when (IsConcurrencyConflict(ex))
+        {
+            // A concurrent purge (or retry) touched the same rows first;
+            // the next pass observes the converged state.
+            _logger.LogDebug(ex, "Webhook retention purge converged with a concurrent update.");
+            return 0;
+        }
+        if (deleted > 0)
+            _logger.LogInformation("Purged {Count} webhook deliveries received before {Cutoff}.", deleted, cutoff);
+        return deleted;
+    }
+
     public async Task RetryAsync(Guid deliveryId, CancellationToken ct)
     {
         var delivery = await _deliveries.GetByIdAsync(deliveryId, ct)
